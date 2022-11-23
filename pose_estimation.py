@@ -5,30 +5,54 @@ import math
 from sympy import Point, Line
 import copy
 
+class intersec_point:
+    def __init__(self, pos=[], line1_index=None, line2_index=None):
+        self.pos = np.array(pos)
+        self.line1_index = line1_index
+        self.line2_index = line2_index
 
-#set path of img file
-#there is a folder with 8 images to try out wich you can acces by changing the number x in x.jpg
-file = 'test_images/3.jpg'
+    def pos_tuple(self):
+        return (int(self.pos[0]), int(self.pos[1]))
+
+
+class line:
+    def __init__(self, pos1=[], pos2=[], angle=None):
+        self.pos1 = np.array(pos1)
+        self.pos2 = np.array(pos2)
+        self.angle = angle
+
+    def pos1_tuple(self):
+        return (int(self.pos1[0]), int(self.pos1[1]))
+
+    def pos2_tuple(self):
+        return (int(self.pos2[0]), int(self.pos2[1]))
+
+class bounds:
+    def __init__(self, min_x, max_x, min_y, max_y):
+        self.min_x = min_x
+        self.max_x = max_x
+        self.min_y = min_y
+        self.max_y = max_y
 
 # set color bounds based on if green or blue is more present in the center of the image
 def set_color_range(img):
     blue_counter = 0
     green_counter = 0
+    hsv = cv.cvtColor(img, cv.COLOR_RGB2HSV)
     for i in range(int(img_height/4), int(img_height/4*3)):
         for j in range(int(img_width/4), int(img_width/4*3)):
-            if (img[i][j][2] > img[i][j][0]) and (img[i][j][2] > img[i][j][1]):
-                blue_counter += 1
-            elif (img[i][j][1] > img[i][j][0]) and (img[i][j][1] > img[i][j][2]):
-                green_counter +=1
+            if hsv[i][j][0] > 30:
+                if (hsv[i][j][0] > 90) and (hsv[i][j][0] < 135):
+                    blue_counter += 1
+                elif (hsv[i][j][0] > 20) and (hsv[i][j][0] < 75):
+                    green_counter +=1
 
     if blue_counter >= green_counter:
         lower_bound = np.array([90, 30, 90])
         upper_bound = np.array([135, 255, 255])
-        print([blue_counter, green_counter])
     else:
         lower_bound = np.array([40, 30, 90])
         upper_bound = np.array([75, 255, 255])
-        print([blue_counter, green_counter])
 
     return lower_bound, upper_bound
 
@@ -46,11 +70,6 @@ def noise_reduction(gray_img):
         mask = cv.inRange(blurred_img, 100, 255)
         blurred_img = cv.bitwise_and(blurred_img, blurred_img, mask=mask)
     return blurred_img
-
-# calulate area of a triangle with points a,b,c
-def calc_tri_area(a, b, c):
-    return 0.5 * abs(a[0]*(b[1]-c[1]) + b[0]*(c[1]-a[1]) + c[0]*(a[1]-b[1]))
-
 
 # use hough transformation with decreasing minimum number of points to detect lines in a given edge img until 4 edges are found
 # the lines are further sorted out if a similar line already exists or if there is no other line with roughle the same angle
@@ -95,8 +114,8 @@ def get_defining_lines(edge_img, fraction, ):
 
             #sort out lines that are very similar
             for l in reduced_lines:
-                l_pt1 = l[0][0]
-                l_pt2 = l[0][1]
+                l_pt1 = l.pos1
+                l_pt2 = l.pos2
 
                 if np.linalg.norm(new_pt1-l_pt1) > np.linalg.norm(new_pt1-l_pt2):
                     l_pt1, l_pt2 = l_pt2, l_pt1
@@ -108,37 +127,48 @@ def get_defining_lines(edge_img, fraction, ):
                     break
 
             # append list of remaining lines and further sort out lines that are completely in the top third of the image
-            if (new) and ((new_pt1[1]> img_height/3) or (new_pt2[1]> img_height/3)):
-                reduced_lines.append([[new_pt1, new_pt2], theta])
+            if (new) and ((new_pt1[1] > img_height/3) or (new_pt2[1] > img_height/3)):
+               reduced_lines.append(line(new_pt1, new_pt2, theta))
 
     return reduced_lines
 
+# takes 2 lines as input and returns their intersection as an int tuple
+def get_single_intersection(line1, line2):
+    l1 = Line(Point(line1.pos1[0], line1.pos1[1]), Point(line1.pos2[0], line1.pos2[1]))
+    l2 = Line(Point(line2.pos1[0], line2.pos1[1]), Point(line2.pos2[0], line2.pos2[1]))
+    p = l1.intersection(l2)
 
-#calculate the intersection points of given lines
+    if (p != [] and (p[0].x >= 0) and (p[0].y >= 0) and (p[0].x <= img_width) and (p[0].y <= img_height)):
+        return (intersec_point(np.array([int(p[0].x), int(p[0].y)])))
+    else:
+        return intersec_point()
+
+
+#calculate the intersection points of given lines and store their belonging lines indices
 def get_intersections(lines):
     intersection_points = []
     for i in range(len(lines)):
         for j in range(i+1, len(lines)):
-            l1 = Line(Point(lines[i][0][0][0], lines[i][0][0][1]), Point(lines[i][0][1][0], lines[i][0][1][1]))
-            l2 = Line(Point(lines[j][0][0][0], lines[j][0][0][1]), Point(lines[j][0][1][0], lines[j][0][1][1]))
-            p = l1.intersection(l2)
+            candidate_point = get_single_intersection(lines[i], lines[j])
+            print
 
-            if (p != [] and (p[0].x>=0) and (p[0].y>=0) and (p[0].x<= img_width) and (p[0].y<=img_height)):
-                intersection_points.append([int(p[0].x), int(p[0].y)])
+            if len(candidate_point.pos) == 2:
+                intersection_points.append(intersec_point(candidate_point.pos, i, j))
 
     return intersection_points
 
 def draw_points(points, img):
     for point in points:
-        pointed_img = cv.circle(img, (point[0], point[1]), radius=3, color=(255,0,0), thickness = -1)
+        pointed_img = cv.circle(img, intersec_point.pos_tuple(), radius=3, color=(255,0,0), thickness = -1)
     return img
 
 def draw_lines(lines, img):
     line_img = copy.copy(img)
     for line in lines:
-        cv.line(line_img, line[0][0].astype(int), line[0][1].astype(int), (255,0,0), 3, cv.LINE_AA)
+        cv.line(line_img, line.pos1_tuple(), line.pos2_tuple(), (255,0,0), 3, cv.LINE_AA)
     return line_img
 
+# displays all images in an array one after another
 def show_images(images):
     for image in images:
         cv.imshow("img", cv.cvtColor(image, cv.COLOR_RGB2BGR))
@@ -150,8 +180,8 @@ def get_corners(points):
     y_arr = []
     corners = []
     for point in points:
-        x_arr.append(point[0])
-        y_arr.append(point[1])
+        x_arr.append(point.pos[0])
+        y_arr.append(point.pos[1])
 
     corners.append(points[x_arr.index(max(x_arr))])
     corners.append(points[x_arr.index(min(x_arr))])
@@ -163,7 +193,7 @@ def get_corners(points):
 #out of all contours only return the 2 with maximal area enclosed
 #if the second largest area is much smaller than the largest,
 #it is assumed that the table was not split in half by contours and therefore only the largest will be returned
-def get_table_contours(contours):
+def get_table_contours(contours, min_second_size):
     max1 = [0, 0];
     max2 = [0, 0];
     for i in range(len(contours)):
@@ -174,7 +204,7 @@ def get_table_contours(contours):
             max2 = [area, i]
 
     table_contours = [contours[max1[1]]]
-    if (max1[0] < 3 * max2[0]) or (len(contours) == 1):
+    if (max1[0] * min_second_size < max2[0]) or (len(contours) == 1):
         table_contours.append(contours[max2[1]])
     return table_contours
 
@@ -191,15 +221,13 @@ def fill_table_contours(contour_img):
 # calculate the x and y span in which the contours are placed
 def get_contour_bounds(contour_img):
     x,y,w,h = cv.boundingRect(contour_img)
-    x_span = [x, x+w]
-    y_span = [y, y+h]
 
-    return x_span, y_span
+    return bounds(x, x+w, y, y+h)
 
 # sort out points that are guranteed to be no table corners
 # returns candidate points for table corners and a bool,
 # indicating if at least one point is close to every span extremum
-def get_possible_points(points, x_span, y_span):
+def get_possible_points(points, bounds):
     points_in_bounds = []
     allowed_error = img_height/20
     boarders_reached_check = [0, 0, 0, 0]
@@ -208,18 +236,21 @@ def get_possible_points(points, x_span, y_span):
 
         contact_to_boarder = False
 
+        in_x_bounds = (point.pos[0] > bounds.min_x - allowed_error) and (point.pos[0] < bounds.max_x + allowed_error)
+        in_y_bounds = (point.pos[1] > bounds.min_y - allowed_error) and (point.pos[1] < bounds.max_y + allowed_error)
+
         # check if a point lies in a given span and allows some error
-        if ((point[0]>x_span[0]-allowed_error) and (point[0]<x_span[1]+allowed_error) and (point[1]>y_span[0]-allowed_error ) and (point[1]<y_span[1]+allowed_error)):
-            if abs(point[0] - x_span[0]) < allowed_error:
+        if in_x_bounds and in_y_bounds:
+            if abs(point.pos[0] - bounds.min_x) < allowed_error:
                 boarders_reached_check[0] = 1
                 contact_to_boarder = True
-            elif abs(point[0] - x_span[1]) < allowed_error:
+            elif abs(point.pos[0] - bounds.max_x) < allowed_error:
                 boarders_reached_check[1] = 1
                 contact_to_boarder = True
-            elif abs(point[1] - y_span[0]) < allowed_error:
+            elif abs(point.pos[1] - bounds.min_y) < allowed_error:
                 boarders_reached_check[2] = 1
                 contact_to_boarder = True
-            elif abs(point[1] - y_span[1]) < allowed_error:
+            elif abs(point.pos[1] - bounds.max_y) < allowed_error:
                 boarders_reached_check[3] = 1
                 contact_to_boarder = True
 
@@ -228,89 +259,146 @@ def get_possible_points(points, x_span, y_span):
 
     return points_in_bounds, sum(boarders_reached_check)==4
 
+#takes possible corners and tries to fix wrong ones created by occlusion
+def fix_occlusions(corners, lines):
+    line_hits = [0] * len(lines)
+    corner_indices = []
+    for corner in corners:
+        line_hits[corner.line1_index] += 1
+        line_hits[corner.line2_index] += 1
+
+    if (line_hits.count(1) == 0) and (line_hits.count(2) == 4):
+        return corners, True
+
+    elif (line_hits.count(1) == 2):
+        possibly_wrong_corners = []
+        one_hit_lines = []
+        for i in range(len(line_hits)):
+            if line_hits[i] == 1:
+                one_hit_lines.append(i)
+
+        for i in range(len(corners)):
+            if (corners[i].line1_index in one_hit_lines):
+                possibly_wrong_corners.append(corners[i])
+                corner_indices.append(i)
+            if (corners[i].line2_index in one_hit_lines):
+                possibly_wrong_corners.append(intersec_point(corners[i].pos, corners[i].line2_index, corners[i].line1_index))
+                corner_indices.append(i)
+
+        corner_candidate_1 = get_single_intersection(lines[possibly_wrong_corners[0].line2_index], lines[possibly_wrong_corners[1].line1_index])
+
+        corner_candidate_2 = get_single_intersection(lines[possibly_wrong_corners[0].line1_index], lines[possibly_wrong_corners[1].line2_index])
+
+        candidate_1_dist = np.linalg.norm([corner_candidate_1.pos - possibly_wrong_corners[0].pos])
+        candidate_2_dist = np.linalg.norm([corner_candidate_2.pos - possibly_wrong_corners[1].pos])
+
+        final_corners = corners
+
+        if candidate_1_dist > candidate_2_dist:
+            final_corners[corner_indices[1]] = corner_candidate_2
+            return final_corners, True
+        else:
+            final_corners[corner_indices[0]] = corner_candidate_1
+            return final_corners, True
+
+    else:
+        return [], False
+
+# draw a rotated coordinate frame in an img
+def draw_coordinate_frame(img, rvec, tvec, camera_matrix, dist_coeffs):
+    orig = np.array([[0], [0], [0.0001]])
+    x_vec = np.array([[1], [0], [0]]) * 152.0
+    y_vec = np.array([[0], [1], [0]]) * 152.0
+    z_vec = np.array([[0], [0], [1]]) * 152.0
+
+    orig,  _ = cv.projectPoints(orig, rvec, tvec, camera_matrix, dist_coeffs)
+    x_vec, _ = cv.projectPoints(x_vec, rvec, tvec, camera_matrix, dist_coeffs)
+    y_vec, _ = cv.projectPoints(y_vec, rvec, tvec, camera_matrix, dist_coeffs)
+    z_vec, _ = cv.projectPoints(z_vec, rvec, tvec, camera_matrix, dist_coeffs)
+
+    cv.line(img, (int(orig[0][0][0]), int(orig[0][0][1])), (int(x_vec[0][0][0]), int(x_vec[0][0][1])), (255, 0, 0), 2)
+    cv.line(img, (int(orig[0][0][0]), int(orig[0][0][1])), (int(y_vec[0][0][0]), int(y_vec[0][0][1])), (0, 255, 0), 2)
+    cv.line(img, (int(orig[0][0][0]), int(orig[0][0][1])), (int(z_vec[0][0][0]), int(z_vec[0][0][1])), (0, 0, 255), 2)
 
 
+if __name__ == "__main__":
 
-# read img and convert to RGB color
-img = cv.imread(file)
-img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
+    # set path of img file
+    # there is a folder with 8 images to try out wich you can acces by changing the number x in x.jpg
+    file = 'test_images/blue/1.jpg'
 
-# get img size
-img_width = img.shape[1]
-img_height = img.shape[0]
-img_area = img_width * img_height
+    # read img and convert to RGB color
+    img = cv.imread(file)
+    img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
 
-lower_bound, upper_bound = set_color_range(img)
+    # get img size
+    img_width = img.shape[1]
+    img_height = img.shape[0]
+    img_area = img_width * img_height
 
-#process img and apply all transformations
-mask = color_filter(img, lower_bound, upper_bound)
-kernel = np.ones((5,5),np.uint8)
-closing = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
-contours, hierarchy = cv.findContours(closing, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
-table_contours = get_table_contours(contours)
-contour_img = cv.drawContours(np.zeros((img_height, img_width), dtype="uint8"), table_contours, -1, 255, 1)
-x_span, y_span = get_contour_bounds(contour_img)
+    lower_bound, upper_bound = set_color_range(img)
 
-hough_denominator = 3
-valid_corners = False
+    #process img and apply all transformations
+    mask = color_filter(img, lower_bound, upper_bound)
+    kernel = np.ones((5,5),np.uint8)
+    closing = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
+    contours, hierarchy = cv.findContours(closing, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
+    table_contours = get_table_contours(contours, 1/4)
+    contour_img = cv.drawContours(np.zeros((img_height, img_width), dtype="uint8"), table_contours, -1, 255, 1)
+    bounding_box = get_contour_bounds(contour_img)
 
-while hough_denominator <= 10:
-    hough_denominator += 1
-    defining_lines = get_defining_lines(contour_img, hough_denominator)
-    line_img = draw_lines(defining_lines, img)
-    intersections = get_intersections(defining_lines)
-    possible_corners, all_edges_reached = get_possible_points(intersections, x_span, y_span)
-    if (all_edges_reached == True):
-        corners = get_corners(possible_corners)
-        valid_corners = True
-        break
+    hough_denominator = 3
+    valid_corners = False
+    fix_successful = False
 
-if valid_corners == False:
-    print("Corners not found")
-else:
+    while hough_denominator <= 20:
+        hough_denominator += 1
+        defining_lines = get_defining_lines(contour_img, hough_denominator)
+        line_img = draw_lines(defining_lines, img)
+        intersections = get_intersections(defining_lines)
+        possible_corners, all_edges_reached = get_possible_points(intersections, bounding_box)
+        if (all_edges_reached == True):
+            corners = get_corners(possible_corners)
+            corners, fix_successful = fix_occlusions(corners, defining_lines)
+            valid_corners = True
+            break
 
-    #set 2D and 3D corner coordinates
-    points_2D = np.array([(corners[0][0], corners[0][1]),
-                          (corners[1][0], corners[1][1]),
-                          (corners[2][0], corners[2][1]),
-                          (corners[3][0], corners[3][1])], dtype="double")
+    if (valid_corners == False) or (fix_successful == False):
+        print("Corners not found")
+    else:
+        #set 2D and 3D corner coordinates
+        points_2D = np.array([corners[0].pos_tuple(),
+                              corners[1].pos_tuple(),
+                              corners[2].pos_tuple(),
+                              corners[3].pos_tuple()], dtype="double")
 
-    points_3D = np.array([(137, -76.25, 0),
-                          (-137, 76.25, 0),
-                          (-137, -76.25, 0),
-                          (137, 76.25, 0)], dtype="double")
+        points_3D = np.array([(137, -76.25, 0),
+                              (-137, 76.25, 0),
+                              (-137, -76.25, 0),
+                              (137, 76.25, 0)], dtype="double")
 
-    # make empty distance coefficients and estimate camera matrix
-    dist_coeffs = np.zeros((4, 1))
+        # make empty distance coefficients and estimate camera matrix
+        dist_coeffs = np.zeros((4, 1))
 
-    camera_matrix=np.array([(img_width, 0, img_width/2),
-                            (0, img_height, img_height/2),
-                            (0,0,1)])
+        camera_matrix=np.array([(img_width, 0, img_width/2),
+                                (0, img_height, img_height/2),
+                                (0,0,1)])
 
-    #estimate rotation vector and translation vector
-    success, rotation_vector, translation_vector, inliers = cv.solvePnPRansac(points_3D, points_2D, camera_matrix, dist_coeffs, flags=0)
+        #estimate rotation vector and translation vector
+        success, rotation_vector, translation_vector, inliers = cv.solvePnPRansac(points_3D, points_2D, camera_matrix, dist_coeffs, flags=0)
 
-    #calculate 2D surface normal
-    nose_end_point2D, jacobian = cv.projectPoints(np.array([(0.0, 0.0, 1000.0)]), rotation_vector, translation_vector,camera_matrix, dist_coeffs)
+        #calculate 2D surface normal
+        nose_end_point2D, jacobian = cv.projectPoints(np.array([(0.0, 0.0, 1000.0)]), rotation_vector, translation_vector,camera_matrix, dist_coeffs)
 
-    for p in points_2D:
-      cv.circle(img, (int(p[0]), int(p[1])), 3, (255,0,0), -1)
+        for p in points_2D:
+          cv.circle(img, (int(p[0]), int(p[1])), 3, (255,0,0), -1)
 
-    # draw surface normal line
-    point1 = [points_2D[0][0], points_2D[0][1]]
-    point2 = [nose_end_point2D[0][0][0], nose_end_point2D[0][0][1]]
+        rotation_matrix, jacobian = cv.Rodrigues(rotation_vector)
 
-    if point2[1] > point1[1]:
-        point2[0] = point1[0]-(point2[0]-point1[0])
-        point2[1] = point1[1] - (point2[1] - point1[1])
+        draw_coordinate_frame(img, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
 
-    point1 = (int(point1[0]), int(point1[1]))
-    point2 = (int(point2[0]), int(point2[1]))
-
-    cv.line(img, point1, point2, (255, 0, 0), 2)
-
-    # Display desired images
-    show_images([img])
+        # Display desired images
+        show_images([img])
 
 
 
