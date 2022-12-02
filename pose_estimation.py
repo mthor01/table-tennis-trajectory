@@ -1,9 +1,13 @@
+import csv
+
 import numpy as np
 import cv2 as cv
 from matplotlib import pyplot as plt
 import math
 from sympy import Point, Line
 import copy
+import os
+
 
 class intersec_point:
     def __init__(self, pos=[], line1_index=None, line2_index=None):
@@ -27,6 +31,7 @@ class line:
     def pos2_tuple(self):
         return (int(self.pos2[0]), int(self.pos2[1]))
 
+
 class bounds:
     def __init__(self, min_x, max_x, min_y, max_y):
         self.min_x = min_x
@@ -34,35 +39,52 @@ class bounds:
         self.min_y = min_y
         self.max_y = max_y
 
+
+def num_pixels_in_range(img, lower_bound, upper_bound, img_width, img_height):
+    counter = 0
+    hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+    for i in range(img_height):
+        for j in range(img_width):
+            if hsv[i][j][1] > 30:
+                if (hsv[i][j][0] > lower_bound[0]) and (hsv[i][j][0] < upper_bound[0]):
+                    counter += 1
+    cv.count
+
+    return counter
+
 # set color bounds based on if green or blue is more present in the center of the image
-def set_color_range(img):
+def set_color_range(img, img_width, img_height):
     blue_counter = 0
     green_counter = 0
-    hsv = cv.cvtColor(img, cv.COLOR_RGB2HSV)
-    for i in range(int(img_height/4), int(img_height/4*3)):
-        for j in range(int(img_width/4), int(img_width/4*3)):
-            if hsv[i][j][0] > 30:
+    hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+    for i in range(int(img_height / 4), int(img_height / 4 * 3)):
+        for j in range(int(img_width / 4), int(img_width / 4 * 3)):
+            if hsv[i][j][1] > 30:
                 if (hsv[i][j][0] > 90) and (hsv[i][j][0] < 135):
                     blue_counter += 1
                 elif (hsv[i][j][0] > 20) and (hsv[i][j][0] < 75):
-                    green_counter +=1
+                    green_counter += 1
 
     if blue_counter >= green_counter:
         lower_bound = np.array([90, 30, 90])
         upper_bound = np.array([135, 255, 255])
+        color = "blue"
     else:
         lower_bound = np.array([40, 30, 90])
         upper_bound = np.array([75, 255, 255])
+        color = "green"
 
     return lower_bound, upper_bound
 
+
 # return mask of img after applying a filter of given color ranges
 def color_filter(img, lower, upper):
-    hsv = cv.cvtColor(img, cv.COLOR_RGB2HSV)
+    hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
     mask = cv.inRange(hsv, lower, upper)
     return mask
 
-#reduce noise in a grayscaled img by removing and filling out of noise
+
+# reduce noise in a grayscaled img by removing and filling out of noise
 def noise_reduction(gray_img):
     blurred_img = gray_img
     for i in range(5):
@@ -71,14 +93,14 @@ def noise_reduction(gray_img):
         blurred_img = cv.bitwise_and(blurred_img, blurred_img, mask=mask)
     return blurred_img
 
+
 # use hough transformation with decreasing minimum number of points to detect lines in a given edge img until 4 edges are found
 # the lines are further sorted out if a similar line already exists or if there is no other line with roughle the same angle
-def get_defining_lines(edge_img, fraction, ):
+def get_defining_lines(edge_img, fraction, img_width, img_height):
     final_lines = []
-    lines = cv.HoughLines(edge_img, 1, np.pi / 180 / 2, int(img_height/fraction), None, 0, 0)
+    reduced_lines = []
+    lines = cv.HoughLines(edge_img, 1, np.pi / 180 / 2, int(img_height / fraction), None, 0, 0)
     if lines is not None:
-        reduced_lines = []
-        final_lines = []
         for i in range(0, len(lines)):
             new = True
             rho = lines[i][0][0]
@@ -87,9 +109,9 @@ def get_defining_lines(edge_img, fraction, ):
             b = math.sin(theta)
             x0 = a * rho
             y0 = b * rho
-            pt1 = np.array([int(x0 + 1000*(-b)), int(y0 + 1000*(a))])
-            pt2 = np.array([int(x0 - 1000*(-b)), int(y0 - 1000*(a))])
-            line_dir = pt2-pt1
+            pt1 = np.array([int(x0 + 1000 * (-b)), int(y0 + 1000 * (a))])
+            pt2 = np.array([int(x0 - 1000 * (-b)), int(y0 - 1000 * (a))])
+            line_dir = pt2 - pt1
             line_dir_x = np.sign(line_dir[0]) * max(abs(line_dir[0]), 0.001)
             line_dir_y = np.sign(line_dir[1]) * max(abs(line_dir[1]), 0.001)
 
@@ -103,8 +125,7 @@ def get_defining_lines(edge_img, fraction, ):
             new_pt1_x = pt1 + line_dir * (-pt1[0] / line_dir_x)
             new_pt1_y = pt1 + line_dir * (-pt1[1] / line_dir_y)
 
-
-            #choose new points describing the lines, placed at the edges of the img
+            # choose new points describing the lines, placed at the edges of the img
             if np.linalg.norm(new_pt1_x) < np.linalg.norm(new_pt1_y):
                 new_pt1 = new_pt1_x
                 new_pt2 = new_pt1 + line_dir * (img_width / line_dir_x)
@@ -112,28 +133,37 @@ def get_defining_lines(edge_img, fraction, ):
                 new_pt1 = new_pt1_y
                 new_pt2 = new_pt1 + line_dir * (img_height / line_dir_y)
 
-            #sort out lines that are very similar
+            # sort out lines that are very similar
             for l in reduced_lines:
                 l_pt1 = l.pos1
                 l_pt2 = l.pos2
 
-                if np.linalg.norm(new_pt1-l_pt1) > np.linalg.norm(new_pt1-l_pt2):
+                if np.linalg.norm(new_pt1 - l_pt1) > np.linalg.norm(new_pt1 - l_pt2):
                     l_pt1, l_pt2 = l_pt2, l_pt1
 
-                dist_pt1 = np.linalg.norm(new_pt1-l_pt1)
-                dist_pt2 = np.linalg.norm(new_pt2-l_pt2)
-                if ((dist_pt1 < img_width/20) and (dist_pt2 < img_width/20)):
+                dist_pt1 = np.linalg.norm(new_pt1 - l_pt1)
+                dist_pt2 = np.linalg.norm(new_pt2 - l_pt2)
+                if ((dist_pt1 < img_width / 20) and (dist_pt2 < img_width / 20)):
                     new = False
                     break
 
             # append list of remaining lines and further sort out lines that are completely in the top third of the image
-            if (new) and ((new_pt1[1] > img_height/3) or (new_pt2[1] > img_height/3)):
-               reduced_lines.append(line(new_pt1, new_pt2, theta))
+            if new: #and ((new_pt1[1] > img_height / 3) or (new_pt2[1] > img_height / 3)):
+                reduced_lines.append(line(new_pt1, new_pt2, theta))
 
-    return reduced_lines
+
+        for i in range(len(reduced_lines)):
+            for j in range(len(reduced_lines)):
+                if not(i == j) and abs(reduced_lines[i].angle - reduced_lines[j].angle) < 10/180*math.pi:
+                    final_lines.append(reduced_lines[i])
+                    break
+
+
+    return final_lines
+
 
 # takes 2 lines as input and returns their intersection as an int tuple
-def get_single_intersection(line1, line2):
+def get_single_intersection(line1, line2, img_width, img_height):
     l1 = Line(Point(line1.pos1[0], line1.pos1[1]), Point(line1.pos2[0], line1.pos2[1]))
     l2 = Line(Point(line2.pos1[0], line2.pos1[1]), Point(line2.pos2[0], line2.pos2[1]))
     p = l1.intersection(l2)
@@ -144,29 +174,31 @@ def get_single_intersection(line1, line2):
         return intersec_point()
 
 
-#calculate the intersection points of given lines and store their belonging lines indices
-def get_intersections(lines):
+# calculate the intersection points of given lines and store their belonging lines indices
+def get_intersections(lines, img_width, img_height):
     intersection_points = []
     for i in range(len(lines)):
-        for j in range(i+1, len(lines)):
-            candidate_point = get_single_intersection(lines[i], lines[j])
-            print
+        for j in range(i + 1, len(lines)):
+            candidate_point = get_single_intersection(lines[i], lines[j], img_width, img_height)
 
             if len(candidate_point.pos) == 2:
                 intersection_points.append(intersec_point(candidate_point.pos, i, j))
 
     return intersection_points
 
+
 def draw_points(points, img):
     for point in points:
-        pointed_img = cv.circle(img, intersec_point.pos_tuple(), radius=3, color=(255,0,0), thickness = -1)
-    return img
+        pointed_img = cv.circle(img, point.pos_tuple(), radius=3, color=(255, 0, 0), thickness=-1)
+    return pointed_img
+
 
 def draw_lines(lines, img):
     line_img = copy.copy(img)
     for line in lines:
-        cv.line(line_img, line.pos1_tuple(), line.pos2_tuple(), (255,0,0), 3, cv.LINE_AA)
+        cv.line(line_img, line.pos1_tuple(), line.pos2_tuple(), (255, 0, 0), 3, cv.LINE_AA)
     return line_img
+
 
 # displays all images in an array one after another
 def show_images(images):
@@ -174,7 +206,8 @@ def show_images(images):
         cv.imshow("img", cv.cvtColor(image, cv.COLOR_RGB2BGR))
         cv.waitKey(0)
 
-#determine the min and max points of both axis out of a given set of points
+
+# determine the min and max points of both axis out of a given set of points
 def get_corners(points):
     x_arr = []
     y_arr = []
@@ -190,9 +223,10 @@ def get_corners(points):
 
     return corners
 
-#out of all contours only return the 2 with maximal area enclosed
-#if the second largest area is much smaller than the largest,
-#it is assumed that the table was not split in half by contours and therefore only the largest will be returned
+
+# out of all contours only return the 2 with maximal area enclosed
+# if the second largest area is much smaller than the largest,
+# it is assumed that the table was not split in half by contours and therefore only the largest will be returned
 def get_table_contours(contours, min_second_size):
     max1 = [0, 0];
     max2 = [0, 0];
@@ -208,8 +242,9 @@ def get_table_contours(contours, min_second_size):
         table_contours.append(contours[max2[1]])
     return table_contours
 
+
 # creates a black image with white filled given contours
-def fill_table_contours(contour_img):
+def fill_table_contours(contour_img, img_height):
     im_floodfill = contour_img.copy()
     mask = np.zeros((img_height + 2, img_width + 2), np.uint8)
     cv.floodFill(im_floodfill, mask, (0, 0), 255);
@@ -218,18 +253,20 @@ def fill_table_contours(contour_img):
     filled_img = cv.morphologyEx(filled_img, cv.MORPH_CLOSE, kernel)
     return filled_img
 
+
 # calculate the x and y span in which the contours are placed
 def get_contour_bounds(contour_img):
-    x,y,w,h = cv.boundingRect(contour_img)
+    x, y, w, h = cv.boundingRect(contour_img)
 
-    return bounds(x, x+w, y, y+h)
+    return bounds(x, x + w, y, y + h)
+
 
 # sort out points that are guranteed to be no table corners
 # returns candidate points for table corners and a bool,
 # indicating if at least one point is close to every span extremum
-def get_possible_points(points, bounds):
+def get_possible_points(points, bounds, img_height):
     points_in_bounds = []
-    allowed_error = img_height/20
+    allowed_error = img_height / 20
     boarders_reached_check = [0, 0, 0, 0]
 
     for point in points:
@@ -257,10 +294,11 @@ def get_possible_points(points, bounds):
         if contact_to_boarder == True:
             points_in_bounds.append(point)
 
-    return points_in_bounds, sum(boarders_reached_check)==4
+    return points_in_bounds, sum(boarders_reached_check) == 4
 
-#takes possible corners and tries to fix wrong ones created by occlusion
-def fix_occlusions(corners, lines):
+
+# takes possible corners and tries to fix wrong ones created by occlusion
+def fix_occlusions(corners, in_bound_points, lines):
     line_hits = [0] * len(lines)
     corner_indices = []
     for corner in corners:
@@ -282,12 +320,14 @@ def fix_occlusions(corners, lines):
                 possibly_wrong_corners.append(corners[i])
                 corner_indices.append(i)
             if (corners[i].line2_index in one_hit_lines):
-                possibly_wrong_corners.append(intersec_point(corners[i].pos, corners[i].line2_index, corners[i].line1_index))
+                possibly_wrong_corners.append(
+                    intersec_point(corners[i].pos, corners[i].line2_index, corners[i].line1_index))
                 corner_indices.append(i)
 
-        corner_candidate_1 = get_single_intersection(lines[possibly_wrong_corners[0].line2_index], lines[possibly_wrong_corners[1].line1_index])
-
-        corner_candidate_2 = get_single_intersection(lines[possibly_wrong_corners[0].line1_index], lines[possibly_wrong_corners[1].line2_index])
+        corner_candidate_1 = get_single_intersection(lines[possibly_wrong_corners[0].line2_index],
+                                                     lines[possibly_wrong_corners[1].line1_index])
+        corner_candidate_2 = get_single_intersection(lines[possibly_wrong_corners[0].line1_index],
+                                                     lines[possibly_wrong_corners[1].line2_index])
 
         candidate_1_dist = np.linalg.norm([corner_candidate_1.pos - possibly_wrong_corners[0].pos])
         candidate_2_dist = np.linalg.norm([corner_candidate_2.pos - possibly_wrong_corners[1].pos])
@@ -304,6 +344,7 @@ def fix_occlusions(corners, lines):
     else:
         return [], False
 
+
 # draw a rotated coordinate frame in an img
 def draw_coordinate_frame(img, rvec, tvec, camera_matrix, dist_coeffs):
     orig = np.array([[0], [0], [0.0001]])
@@ -311,7 +352,7 @@ def draw_coordinate_frame(img, rvec, tvec, camera_matrix, dist_coeffs):
     y_vec = np.array([[0], [1], [0]]) * 152.0
     z_vec = np.array([[0], [0], [1]]) * 152.0
 
-    orig,  _ = cv.projectPoints(orig, rvec, tvec, camera_matrix, dist_coeffs)
+    orig, _ = cv.projectPoints(orig, rvec, tvec, camera_matrix, dist_coeffs)
     x_vec, _ = cv.projectPoints(x_vec, rvec, tvec, camera_matrix, dist_coeffs)
     y_vec, _ = cv.projectPoints(y_vec, rvec, tvec, camera_matrix, dist_coeffs)
     z_vec, _ = cv.projectPoints(z_vec, rvec, tvec, camera_matrix, dist_coeffs)
@@ -321,85 +362,176 @@ def draw_coordinate_frame(img, rvec, tvec, camera_matrix, dist_coeffs):
     cv.line(img, (int(orig[0][0][0]), int(orig[0][0][1])), (int(z_vec[0][0][0]), int(z_vec[0][0][1])), (0, 0, 255), 2)
 
 
-if __name__ == "__main__":
+def max_error(corners, points_3D, rvec, tvec, camera_matrix, dist_coeffs):
+    projected_corners = []
+    for point in points_3D:
+        projection, _ = (cv.projectPoints(point, rvec, tvec, camera_matrix, dist_coeffs))
+        projected_corners.append(np.array([projection[0][0][0], projection[0][0][1]], dtype="double"))
 
-    # set path of img file
-    # there is a folder with 8 images to try out wich you can acces by changing the number x in x.jpg
-    file = 'test_images/blue/1.jpg'
+    maxi = 0.
+    for i in range(4):
+        maxi = max(np.linalg.norm(projected_corners[i] - corners[i].pos), maxi)
+    return maxi
 
-    # read img and convert to RGB color
-    img = cv.imread(file)
-    img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
+
+def estimate_pose(vid_path, scene_list_path):
+    frame_poses = []
+    scene_poses = []
+
+    video = cv.VideoCapture(vid_path)
+    success, candidate_img = video.read()
+    img = candidate_img
 
     # get img size
     img_width = img.shape[1]
     img_height = img.shape[0]
-    img_area = img_width * img_height
 
-    lower_bound, upper_bound = set_color_range(img)
+    lower_bound, upper_bound = set_color_range(img, img_width, img_height)
 
-    #process img and apply all transformations
-    mask = color_filter(img, lower_bound, upper_bound)
-    kernel = np.ones((5,5),np.uint8)
-    closing = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
-    contours, hierarchy = cv.findContours(closing, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
-    table_contours = get_table_contours(contours, 1/4)
-    contour_img = cv.drawContours(np.zeros((img_height, img_width), dtype="uint8"), table_contours, -1, 255, 1)
-    bounding_box = get_contour_bounds(contour_img)
+    cut_frames = []
+    frame = 0
 
-    hough_denominator = 3
-    valid_corners = False
-    fix_successful = False
+    with open(scene_list_path) as scene_file:
+        file_reader = csv.reader(scene_file, delimiter=",")
+        for row in file_reader:
+            frame += 1
+            if frame > 2:
+                cut_frames.append(row[4])
 
-    while hough_denominator <= 20:
-        hough_denominator += 1
-        defining_lines = get_defining_lines(contour_img, hough_denominator)
-        line_img = draw_lines(defining_lines, img)
-        intersections = get_intersections(defining_lines)
-        possible_corners, all_edges_reached = get_possible_points(intersections, bounding_box)
-        if (all_edges_reached == True):
-            corners = get_corners(possible_corners)
-            corners, fix_successful = fix_occlusions(corners, defining_lines)
-            valid_corners = True
-            break
+    cut_frames = list(map(int, cut_frames))
+    start_frame = 1
+    frame = 1
 
-    if (valid_corners == False) or (fix_successful == False):
-        print("Corners not found")
-    else:
-        #set 2D and 3D corner coordinates
-        points_2D = np.array([corners[0].pos_tuple(),
-                              corners[1].pos_tuple(),
-                              corners[2].pos_tuple(),
-                              corners[3].pos_tuple()], dtype="double")
+    for i in range(len(cut_frames)):
+        max_pixels_in_bound = 0
+        while frame < cut_frames[i]:
+            frame += 1
+            success, candidate_img = video.read()
 
-        points_3D = np.array([(137, -76.25, 0),
-                              (-137, 76.25, 0),
-                              (-137, -76.25, 0),
-                              (137, 76.25, 0)], dtype="double")
+            if (frame > start_frame + 30) and (frame < cut_frames[i]-10):
+                num_pixels_in_range = cv.countNonZero(color_filter(candidate_img, lower_bound, upper_bound))
+                if (frame % 10 == 0) and (num_pixels_in_range > max_pixels_in_bound):
+                    max_pixels_in_bound = num_pixels_in_range
+                    img = candidate_img
 
-        # make empty distance coefficients and estimate camera matrix
-        dist_coeffs = np.zeros((4, 1))
+        start_frame = cut_frames[i]
+       # img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
 
-        camera_matrix=np.array([(img_width, 0, img_width/2),
-                                (0, img_height, img_height/2),
-                                (0,0,1)])
+        # process img and apply all transformations
+        mask = color_filter(img, lower_bound, upper_bound)
+        kernel = np.ones((5, 5), np.uint8)
+        closing = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
+        contours, hierarchy = cv.findContours(closing, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
+        table_contours = get_table_contours(contours, 1 / 4)
+        contour_img = cv.drawContours(np.zeros((img_height, img_width), dtype="uint8"), table_contours, -1, 255, 1)
+        bounding_box = get_contour_bounds(contour_img)
 
-        #estimate rotation vector and translation vector
-        success, rotation_vector, translation_vector, inliers = cv.solvePnPRansac(points_3D, points_2D, camera_matrix, dist_coeffs, flags=0)
-
-        #calculate 2D surface normal
-        nose_end_point2D, jacobian = cv.projectPoints(np.array([(0.0, 0.0, 1000.0)]), rotation_vector, translation_vector,camera_matrix, dist_coeffs)
-
-        for p in points_2D:
-          cv.circle(img, (int(p[0]), int(p[1])), 3, (255,0,0), -1)
-
-        rotation_matrix, jacobian = cv.Rodrigues(rotation_vector)
-
-        draw_coordinate_frame(img, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
-
-        # Display desired images
-        show_images([img])
+        hough_denominator = 10
+        max_hough_denominator = 25
+        fix_successful = True
+        all_edges_reached = False
+        points_found = False
 
 
+        while hough_denominator <= max_hough_denominator:
+            hough_denominator += 2
+            defining_lines = get_defining_lines(contour_img, hough_denominator, img_width, img_height)
 
+            #stop if there are too many lines(no hope for good solution and long computation time)
+            if len(defining_lines) >= 6:
+                break
+
+            line_img = draw_lines(defining_lines, img)
+            intersections = get_intersections(defining_lines, img_width, img_height)
+            #in_bound_points, all_edges_reached = get_possible_points(intersections, bounding_box, img_height)
+
+          #  show_images([line_img])
+
+            if not(intersections==[]): #(all_edges_reached == True):
+                corners = get_corners(intersections)
+
+                #for i in range(2):
+                #corners, fix_successful = fix_occlusions(corners, in_bound_points, defining_lines)
+
+
+                points_2D = np.array([corners[0].pos_tuple(),
+                                      corners[1].pos_tuple(),
+                                      corners[2].pos_tuple(),
+                                      corners[3].pos_tuple()], dtype="double")
+
+                points_3D = np.array([(137, -76.25, 0),
+                                      (-137, 76.25, 0),
+                                      (-137, -76.25, 0),
+                                      (137, 76.25, 0)], dtype="double")
+
+                # make empty distance coefficients and estimate camera matrix
+                dist_coeffs = np.zeros((4, 1))
+
+                camera_matrix = np.array([(img_width, 0, img_width / 2),
+                                          (0, img_height, img_height / 2),
+                                          (0, 0, 1)])
+
+                # estimate rotation vector and translation vector
+                success, rotation_vector, translation_vector, inliers = cv.solvePnPRansac(points_3D, points_2D, camera_matrix,
+                                                                                              dist_coeffs, flags=0)
+
+                max_err = max_error(corners, points_3D, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
+
+                #check if the projection is reasonable
+                if max_err < img_height/10:
+                    for p in points_2D:
+                        cv.circle(img, (int(p[0]), int(p[1])), 3, (255, 0, 0), -1)
+
+                    draw_coordinate_frame(img, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
+                    points_found = True
+
+                    break
+
+       # print([translation_vector, rotation_vector, points_found, start_frame])
+       # show_images([cv.cvtColor(img, cv.COLOR_BGR2RGB)])
+        scene_poses.append([translation_vector, rotation_vector, corners, points_found])
+
+    #look for possible fixes of frames that could not get detected properly
+    for i in range(len(scene_poses)):
+        max_similar_points = 0
+        if scene_poses[i][3] == False:
+            for pose2 in scene_poses:
+                if pose2[3] == True:
+                    similar_points = 0
+                    for j in range(4):
+                        if (np.linalg.norm(scene_poses[i][2][j].pos-pose2[2][j].pos) < img_height/40):
+                            similar_points += 1
+                            #print(np.linalg.norm(scene_poses[i][2][j].pos-pose2[2][j].pos))
+                    if similar_points > max_similar_points:
+                        candidate_pose = pose2
+        if max_similar_points > 1:
+            scene_poses[i] = candidate_pose
+
+    start_frame = 0
+
+    for i in range(len(cut_frames)):
+        for j in range(start_frame, cut_frames[i]):
+            frame_poses.append(scene_poses[i])
+        start_frame = cut_frames[i]
+
+    return frame_poses
+
+
+if __name__ == "__main__":
+    scene_list_dir = "scene_lists"
+    video_dir = "single_test_vid"
+    pose_estimation_dir = "pose_estimates"
+
+    for vid in os.listdir(video_dir):
+        pose_list = estimate_pose(video_dir + "/" + vid, scene_list_dir + "/" + vid[:-4] + ".csv")
+        with open(pose_estimation_dir + "/" + vid[:-4] + ".csv", "wt") as pose_estimates_file:
+            pose_estimates_file.write("tvex_x, tvec_y, tvec_z, rvec_x, rvec_y, rvec_z, success \n")
+            for pose in pose_list:
+                pose_estimates_file.write(str(pose[0][0]) + ", "
+                                          + str(pose[0][1]) + ", "
+                                          + str(pose[0][2]) + ", "
+                                          + str(pose[1][0]) + ", "
+                                          + str(pose[1][1]) + ", "
+                                          + str(pose[1][2]) + ", "
+                                          + str(pose[3]) + "\n")
 
