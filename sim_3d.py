@@ -3,17 +3,18 @@ import matplotlib.pyplot as plt
 import math
 from scipy.integrate import odeint
 from matplotlib import animation
+import h5py
 
 # set ball start position/movement/rotation 
 # Y is perpendicular to the table (important to note, as the formulas in the document have the z axis going in that direction)
 X0 = 0.  # m
 Y0 = 0.5  # m
-Z0 = 1.  # m
-VX0 = 10.  # m/s
-VY0 = 0.  # m/s
+Z0 = 1.525/2  # m
+VX0 = 5.  # m/s
+VY0 = -2.  # m/s
 VZ0 = 0.  # m/s
-rotation_axis = [1, 0, 0]
-rpm = 9000
+rotation_axis = [0, 1, 0]
+rpm = 0
 
 # environment properties
 gravity = -9.81  # m/s^2
@@ -28,7 +29,7 @@ COR = 0.9
 net_height=0.15
 
 #simulation properties
-dt = 1/100  # time elapsed in one step in seconds
+dt = 1/90  # time elapsed in one step in seconds
 max_steps = 10000  # maximum step amount
 
 
@@ -113,14 +114,14 @@ class Ball:
         if x >= 0.4:
             self.velocity[0] = 0.6 * self.velocity[0] - 0.4 * self.angular_velocity[2] * radius #changed first + to -
             self.velocity[2] = 0.6 * self.velocity[2] + 0.4 * self.angular_velocity[0] * radius #changed first - to +
-            self.angular_velocity[0] = 0.4 * self.angular_velocity[0] - 0.6 * self.velocity[2] / radius
-            self.angular_velocity[2] = 0.4 * self.angular_velocity[2] + 0.6 * self.velocity[0] / radius
+           # self.angular_velocity[0] = 0.4 * self.angular_velocity[0] - 0.6 * self.velocity[2] / radius
+            #self.angular_velocity[2] = 0.4 * self.angular_velocity[2] + 0.6 * self.velocity[0] / radius
 
         else:
             self.velocity[0] = self.velocity[0] + CF * (1+CR) * abs(self.velocity[1]) * (self.velocity[0] - self.angular_velocity[2] * radius) / denominator #changed first - to +
             self.velocity[2] = self.velocity[2] + CF * (1+CR) * abs(self.velocity[1]) * (self.velocity[2] + self.angular_velocity[0] * radius) / denominator #changed first - to +
-            self.angular_velocity[0] = self.angular_velocity[0] - 3 * CF * (1+CR) * abs(self.velocity[1]) * (self.velocity[2] + self.angular_velocity[0] * radius) / (2*radius*denominator)
-            self.angular_velocity[2] = self.angular_velocity[2] - 3 * CF * (1+CR) * abs(self.velocity[1]) * (-self.velocity[0] + self.angular_velocity[2] * radius) / (2*radius*denominator)
+            #self.angular_velocity[0] = self.angular_velocity[0] - 3 * CF * (1+CR) * abs(self.velocity[1]) * (self.velocity[2] + self.angular_velocity[0] * radius) / (2*radius*denominator)
+            #self.angular_velocity[2] = self.angular_velocity[2] - 3 * CF * (1+CR) * abs(self.velocity[1]) * (-self.velocity[0] + self.angular_velocity[2] * radius) / (2*radius*denominator)
 
 
         self.state_x = self.position_x, self.velocity[0]
@@ -147,7 +148,7 @@ class Ball:
 
 
 ball = Ball()
-dt = 1/100
+dt = 1/90
 time_elapsed = [0]
 steps = 10000
 data = np.zeros((3, steps))
@@ -170,6 +171,8 @@ for i in range(steps):
     N = i
     if (abs(ball.velocity[1])<0.1) & (ball.position_y < 0.03) | break_loop:
         break
+
+
 
 
 fig = plt.figure()
@@ -203,9 +206,39 @@ ax.set_zlim3d([0.0, table_length])
 ax.set_zlabel('Y')
 
 #run the animation
-ani = animation.FuncAnimation(fig, update, N, fargs=(data, line), interval=1/100, blit=False)
-plt.show()
+#ani = animation.FuncAnimation(fig, update, N, fargs=(data, line), interval=1/90, blit=False)
+#plt.show()
 
+data = np.transpose(data)
+
+data_30= []
+for i in range(len(data)):
+    if i%3 == 0:
+        data_30.append(data[i])
+
+
+
+position_file = h5py.File("ball_data/test1_ballpos.hdf5", "w")
+position_data = position_file.create_dataset("positions", data=data_30)
+
+bounces = []
+last_bounce = 0
+for i in range(2, len(data_30)):
+    a = (data_30[i-1][2] - data_30[i-2][2]) < 0
+    b = (data_30[i][2] - data_30[i-1][2]) > 0
+    if a and b:
+        if data_30[i-1][2] < data_30[i][2]:
+            bounces.append([last_bounce, i-1])
+            last_bounce = i - 1
+            print(1)
+        else:
+            bounces.append([last_bounce, i])
+            last_bounce = i
+
+print(bounces)
+
+bounce_file = h5py.File("ball_data/test1_bouncepos.hdf5", "w")
+bounce_data = bounce_file.create_dataset("bounce_positions", data=bounces)
 
 
 

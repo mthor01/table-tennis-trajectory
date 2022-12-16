@@ -18,8 +18,6 @@ def find_scenes(video_dir, scene_list_dir, video_name, threshold=8.0):
     with open(scene_list_dir + "/" + video_name[:-4] + ".csv", "wt") as scene_list_file:
         scenedetect.scene_manager.write_scene_list(scene_list_file, scene_list)
 
-#find_scenes("C:/Users/mthor/Documents/uni/semester7/bachelorarbeit/table_tennis_project/test_videos/4_test.mp4")
-
 video_dir = "single_test_vid"
 scene_list_dir = "scene_lists"
 
