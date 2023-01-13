@@ -157,7 +157,7 @@ def get_defining_lines(edge_img, fraction, img_width, img_height):
 
         for i in range(len(reduced_lines)):
             for j in range(len(reduced_lines)):
-                if not(i == j) and abs(reduced_lines[i].angle - reduced_lines[j].angle) < 10/180*math.pi:
+                if True: #not(i == j) and abs(reduced_lines[i].angle - reduced_lines[j].angle) < 10/180*math.pi:
                     final_lines.append(reduced_lines[i])
                     break
 
@@ -239,10 +239,33 @@ def get_corners(points):
         x_arr.append(point.pos[0])
         y_arr.append(point.pos[1])
 
-    corners.append(points[x_arr.index(max(x_arr))])
-    corners.append(points[x_arr.index(min(x_arr))])
-    corners.append(points[y_arr.index(max(y_arr))])
-    corners.append(points[y_arr.index(min(y_arr))])
+    indices = []
+
+    max_x, max_x_index = 0, 0
+    min_y, min_y_index = 10000, 0
+    max_y, max_y_index = 0, 0
+    indices.append(x_arr.index(min(x_arr)))
+
+    for i in range(4):
+        if not(i in indices) and (x_arr[i]> max_x):
+            max_x = x_arr[i]
+            max_x_index = i
+    indices.append(max_x_index)
+
+    for i in range(4):
+        if not(i in indices) and (y_arr[i]< min_y):
+            min_y = y_arr[i]
+            min_y_index = i
+    indices.append(min_y_index)
+
+    for i in range(4):
+        if not(i in indices) and (y_arr[i]> max_y):
+            max_y = y_arr[i]
+            max_y_index = i
+    indices.append(max_y_index)
+
+    for i in indices:
+        corners.append(points[i])
 
     return corners
 
@@ -250,19 +273,32 @@ def get_corners(points):
 # out of all contours only return the 2 with maximal area enclosed
 # if the second largest area is much smaller than min_second_size times the largest area
 # it is assumed that the table was not split in half by contours and therefore only the largest will be returned
-def get_table_contours(contours, min_second_size):
-    max1 = [0, 0];
+def get_table_contours(contours, min_second_size, img_width, img_height):
+    max1 = [0, -1];
     max2 = [0, 0];
     for i in range(len(contours)):
         area = cv.contourArea(contours[i])
-        if area > max1[0]:
-            max1 = [area, i]
-        elif area > max2[0]:
-            max2 = [area, i]
+        contour_bounds = get_contour_bounds(contours[i])
+        if not((contour_bounds.min_x > img_width/2) or (contour_bounds.min_y > img_height/2) or (contour_bounds.max_x < img_width/2)  or (contour_bounds.max_y < img_height/2)):
+            if area > max1[0]:
+                max1 = [area, i]
+            elif area > max2[0]:
+                max2 = [area, i]
 
-    table_contours = [contours[max1[1]]]
-    if (max1[0] * min_second_size < max2[0]) or (len(contours) == 1):
-        table_contours.append(contours[max2[1]])
+    table_contours = []
+
+    if max1[1] == -1:
+        min = [10000, -1]
+        for i in range(len(contours)):
+            x = min(abs(contour_bounds.min_x - img_width/2), abs(contour_bounds.min_y - img_height/2), abs(contour_bounds.max_x - img_width/2), abs(contour_bounds.max_y - img_height/2))
+            if x < min[0]:
+                min = [x, i]
+        table_contours.append(max1[1])
+    else:
+        table_contours.append(contours[max1[1]])
+        if (max1[0] * min_second_size < max2[0]) or (len(contours) == 1):
+            table_contours.append(contours[max2[1]])
+
     return table_contours
 
 
@@ -278,8 +314,8 @@ def fill_table_contours(contour_img, img_height):
 
 
 # calculate the x and y span in which the contours are placed
-def get_contour_bounds(contour_img):
-    x, y, w, h = cv.boundingRect(contour_img)
+def get_contour_bounds(contour):
+    x, y, w, h = cv.boundingRect(contour)
 
     return bounds(x, x + w, y, y + h)
 
@@ -385,15 +421,17 @@ def draw_coordinate_frame(img, rvec, tvec, camera_matrix, dist_coeffs):
     cv.line(img, (int(orig[0][0][0]), int(orig[0][0][1])), (int(z_vec[0][0][0]), int(z_vec[0][0][1])), (0, 0, 255), 2)
 
 
-def max_error(corners, points_3D, rvec, tvec, camera_matrix, dist_coeffs):
+def max_error(corners, points_3D, rvec, tvec, camera_matrix, dist_coeffs,img):
     projected_corners = []
     for point in points_3D:
         projection, _ = (cv.projectPoints(point, rvec, tvec, camera_matrix, dist_coeffs))
         projected_corners.append(np.array([projection[0][0][0], projection[0][0][1]], dtype="double"))
-
+       # cv.circle(img, (int(projection[0][0][0]), int(projection[0][0][1])), 3, (0, 255, 0), -1)
 
     maxi = 0.
+    error_sum = 0
     for i in range(4):
+        error_sum += np.linalg.norm(projected_corners[i] - corners[i].pos)
         maxi = max(np.linalg.norm(projected_corners[i] - corners[i].pos), maxi)
     return maxi
 
@@ -405,6 +443,35 @@ def min_dist(corners):
     return min_dist
 
 
+def reorder_corners(corners):
+    corner_0_lines = [corners[0].line1_index, corners[0].line2_index]
+    new_corners = [corners[0],0,0,0]
+   # print(corner_0_lines)
+    x = 2
+    for i in range(1,4):
+      #  print(corners[i].line1_index, corners[i].line2_index)
+        if not((corners[i].line1_index in corner_0_lines) or (corners[i].line2_index in corner_0_lines)):
+            new_corners[1] = corners[i]
+     #   elif x > 3:
+      #      new_corners[1] = corners[1]
+        else:
+            new_corners[x] = corners[i]
+            x+=1
+
+    for i in range(4):
+        if new_corners[i] == 0:
+            new_corners[i] = new_corners[0]
+
+
+
+    return new_corners
+
+def get_involved_lines(corners):
+    index_list= []
+    for c in corners:
+        index_list.append(c.line1_index)
+        index_list.append(c.line2_index)
+    return set(index_list)
 
 def estimate_pose(vid_path, scene_list_path):
     frame_indices = []
@@ -468,7 +535,7 @@ def estimate_pose(vid_path, scene_list_path):
         kernel = np.ones((5, 5), np.uint8)
         closing = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
         contours, hierarchy = cv.findContours(closing, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
-        table_contours = get_table_contours(contours, 1 / 4)
+        table_contours = get_table_contours(contours, 1 / 4, img_width, img_height)
         contour_img = cv.drawContours(np.zeros((img_height, img_width), dtype="uint8"), table_contours, -1, 255, 1)
         bounding_box = get_contour_bounds(contour_img)
 
@@ -477,27 +544,38 @@ def estimate_pose(vid_path, scene_list_path):
         fix_successful = True
         all_edges_reached = False
         points_found = False
+       # show_images([cv.drawContours(np.zeros((img_height, img_width), dtype="uint8"), contours, -1, 255, 1)])
 
+        translation_vector = [0,0,0]
+        rotation_vector = [0,0,0]
 
         while hough_denominator <= max_hough_denominator:
             hough_denominator += 2
             defining_lines = get_defining_lines(contour_img, hough_denominator, img_width, img_height)
 
             #stop if there are too many lines(no hope for good solution and long computation time)
-            if len(defining_lines) >= 6:
+            if len(defining_lines) > 5:
                 break
+
+          #  print(len(defining_lines))
 
             line_img = draw_lines(defining_lines, img)
             intersections = get_intersections(defining_lines, img_width, img_height)
+
             #in_bound_points, all_edges_reached = get_possible_points(intersections, bounding_box, img_height)
 
-          #  show_images([line_img])
+         #   show_images([line_img])
 
-            if not(intersections==[]): #(all_edges_reached == True):
+
+            if len(intersections) >= 4: #(all_edges_reached == True):
                 corners = get_corners(intersections)
+              #  print(corners)
+              #  show_images([line_img])
+                corners = reorder_corners(corners)
 
                 #for i in range(2):
                 #corners, fix_successful = fix_occlusions(corners, in_bound_points, defining_lines)
+
 
 
                 points_2D = np.array([corners[0].pos_tuple(),
@@ -527,21 +605,21 @@ def estimate_pose(vid_path, scene_list_path):
                                                                                               dist_coeffs, flags=0)
 
 
+                get_involved_lines(corners)
 
-
-                max_err = max_error(corners, points_3D, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
+                max_err = max_error(corners, points_3D, rotation_vector, translation_vector, camera_matrix, dist_coeffs, img)
+                for p in points_2D:
+                    cv.circle(img, (int(p[0]), int(p[1])), 3, (0, 255, 0), -1)
+               #show_images([img])
 
                 #check if the projection is reasonable
-                if (max_err < img_height/10) and (min_dist(corners) > img_height/10):
+                if (max_err < img_height/15) and (min_dist(corners) > img_height/10) and (len(get_involved_lines(corners)) == 4):
                     for p in points_2D:
                         cv.circle(img, (int(p[0]), int(p[1])), 3, (255, 0, 0), -1)
 
                     draw_coordinate_frame(img, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
                     points_found = True
-                    #show_images([img])
-
-                    #plt.imshow(img)
-                    #plt.show()
+                   # show_images([img, line_img])
 
                     break
 
@@ -568,8 +646,8 @@ def estimate_pose(vid_path, scene_list_path):
         if scene_poses[i][3] == False:
             num_bad_estimations+=1
 
-    #print(len(scene_poses))
-    #print(num_bad_estimations)
+  #  print(len(scene_poses))
+ #   print(num_bad_estimations)
 
     start_frame = 0
 
@@ -592,14 +670,14 @@ def show_poses(poses, indices, vid_path, camera_matrix, dist_coeffs):
     frame = 0
 
     vid = cv.VideoCapture(vid_path)
-    #print(indices)
     for i in range(len(indices)):
         while True:
             success, img = vid.read()
             frame+=1
             if frame == indices[i]:
-                #print([poses[frame][0], poses[frame][1], poses[frame][2]])
-                #print(poses[frame][6])
+                print(poses[frame][6])
+              #  print(frame)
+
                 draw_coordinate_frame(img, np.array([poses[frame][3], poses[frame][4], poses[frame][5]]), np.array([poses[frame][0], poses[frame][1], poses[frame][2]]), camera_matrix, dist_coeffs)
                 show_images([img])
                 break
@@ -614,5 +692,6 @@ if __name__ == "__main__":
 
     for vid in os.listdir(video_dir):
         pose_list, frame_indices, cam_mat, dist_coeffs = estimate_pose(video_dir + "/" + vid, scene_list_dir + "/" + vid[:-4] + ".csv")
-        show_poses(pose_list, frame_indices, video_dir + "/" + vid, cam_mat, dist_coeffs)
+       # show_poses(pose_list, frame_indices, video_dir + "/" + vid, cam_mat, dist_coeffs)
         create_dataset(pose_estimation_dir, vid[:-4], pose_list)
+        break

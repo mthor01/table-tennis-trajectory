@@ -1,5 +1,3 @@
-import cv2 as cv
-import numpy as np
 import scenedetect
 import os
 
@@ -21,5 +19,9 @@ def find_scenes(video_dir, scene_list_dir, video_name, threshold=8.0):
 video_dir = "single_test_vid"
 scene_list_dir = "scene_lists"
 
+for f in os.listdir(scene_list_dir):
+    os.remove(scene_list_dir + "/" + f)
+
 for vid in os.listdir(video_dir):
     find_scenes(video_dir, scene_list_dir, vid)
+    break
