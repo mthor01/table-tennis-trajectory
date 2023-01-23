@@ -1,5 +1,6 @@
 import scenedetect
 import os
+import csv
 
 from scenedetect import SceneManager, open_video, ContentDetector
 

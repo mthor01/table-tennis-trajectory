@@ -141,6 +141,7 @@ class Ball:
     # applies a realistic bounce to the ball, if it hits the table
     # changes direction, self.velocity and angular self.velocity of the ball
     def bounce(self):
+
         CF = -0.0011 * self.velocity[2] * 3.6+0.2526
         CR = min(0.0058 * self.velocity[2] * 3.6 + 1, 0.9)
         numerical_fix = 10**10

@@ -9,6 +9,8 @@ import math
 from functions import calc_vec_angle
 import matplotlib
 import gi
+import seaborn as sn
+
 gi.require_version('Gtk', '3.0')
 
 matplotlib.use("WebAgg")
@@ -41,6 +43,8 @@ def calc_per_angle_avg_errors(errors, poses, angle):
     horizontal_angle_counter = np.zeros(9)
     trajectory_angle_errors = np.zeros(9)
     trajectory_angle_counter = np.zeros(9)
+    heat_map = np.zeros((9,9))
+    heat_map_counter = np.zeros((9,9))
     for i in range(len(errors)):
         if poses[i].valid:
             wrld_cam_vec = cam_to_wrld(poses[i], [0, 0, 1]) - cam_to_wrld(poses[i], [0, 0, 0])
@@ -62,6 +66,8 @@ def calc_per_angle_avg_errors(errors, poses, angle):
             vertical_angle_counter[abs(math.floor(vertical_cam_angle/10))] += 1
             trajectory_angle_errors[abs(math.floor(trajectory_to_cam_angle / 10))] += errors[i]
             trajectory_angle_counter[abs(math.floor(trajectory_to_cam_angle / 10))] += 1
+            heat_map[abs(math.floor(vertical_cam_angle/10)), abs(math.floor(horizontal_cam_angle/10))] += errors[i]
+            heat_map_counter[abs(math.floor(vertical_cam_angle/10)), abs(math.floor(horizontal_cam_angle/10))] += 1
 
             if i == 409 or i == 529:
                 print(vertical_cam_angle)
@@ -69,7 +75,7 @@ def calc_per_angle_avg_errors(errors, poses, angle):
 
 
 
-    return horizontal_angle_errors, vertical_angle_errors, horizontal_angle_counter, vertical_angle_counter, trajectory_angle_errors, trajectory_angle_counter
+    return horizontal_angle_errors, vertical_angle_errors, horizontal_angle_counter, vertical_angle_counter, trajectory_angle_errors, trajectory_angle_counter, heat_map, heat_map_counter
 
 def divide_arrays(arr_1, arr_2):
     output = []
@@ -119,7 +125,7 @@ if __name__ == "__main__":
         else:
             per_vid_errors[vid_name] = [avg_error, 1]
 
-        horizontal_angle_errors, vertical_angle_errors, horizontal_counter, vertical_counter,traj_angle_errors, traj_angle_counter = calc_per_angle_avg_errors(trajectory_errors, poses, trajectory_angle)
+        horizontal_angle_errors, vertical_angle_errors, horizontal_counter, vertical_counter,traj_angle_errors, traj_angle_counter, heatmap, heatmap_counter = calc_per_angle_avg_errors(trajectory_errors, poses, trajectory_angle)
         total_horizontal_angle_errors += horizontal_angle_errors
         total_horizontal_counter += horizontal_counter
         total_vertical_angle_errors += vertical_angle_errors
@@ -134,6 +140,9 @@ if __name__ == "__main__":
     total_vertical_angle_errors = divide_arrays(total_vertical_angle_errors, total_vertical_counter)
     total_trajectory_angle_errors = divide_arrays(total_trajectory_angle_errors, total_trajectory_angle_counter)
 
+    for i in range(len(heatmap)):
+        heatmap[i] = divide_arrays(heatmap[i], heatmap_counter[i])
+
   #  print(per_vid_errors)
 
 
@@ -147,11 +156,15 @@ if __name__ == "__main__":
     fig2 = plt.figure()
     plt.bar(bar_x_axe, total_horizontal_angle_errors)
     plt.ylabel("AVG Euclid Error")
-    plt.xlabel("Smallest angle between camera viewing direction and table plane")
+    plt.xlabel("Angle between camera viewing direction and table plane")
     fig3 = plt.figure()
     plt.bar(bar_x_axe, total_trajectory_angle_errors)
     plt.ylabel("AVG Euclid Error")
     plt.xlabel("Smallest angle between camera viewing direction and trajectory")
+    fig4 = plt.figure()
+    ax = sn.heatmap(heatmap, linewidth=0.5, xticklabels=bar_x_axe, yticklabels=bar_x_axe)
+
     plt.show()
+
 
 

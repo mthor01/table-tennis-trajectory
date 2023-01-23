@@ -210,9 +210,26 @@ def get_intersections(lines, img_width, img_height):
     return intersection_points
 
 
-def draw_points(points, img):
-    for point in points:
-        pointed_img = cv.circle(img, point.pos_tuple(), radius=3, color=(255, 0, 0), thickness=-1)
+def draw_points(points, img, text_pos, color):
+    new_points = []
+    if not isinstance(points[0], intersec_point):
+        for i in range(len(points)):
+            new_points.append(intersec_point(points[i]))
+    else:
+        new_points = points
+
+
+    if text_pos == "above":
+        text_y_change = 15
+    else:
+        text_y_change = -15
+
+    for i in range(len(points)):
+        pointed_img = cv.circle(img, new_points[i].pos_tuple(), radius=3, color=color, thickness=-1)
+      #  print(new_points[i].pos_tuple())
+       # print((new_points[i].pos[0], new_points[i].pos[1]+text_y_change))
+        cv.putText(img, str(i), (int(new_points[i].pos[0]), int(new_points[i].pos[1]+text_y_change)), cv.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+
     return pointed_img
 
 
@@ -407,9 +424,9 @@ def fix_occlusions(corners, in_bound_points, lines):
 # draw a rotated coordinate frame in an img
 def draw_coordinate_frame(img, rvec, tvec, camera_matrix, dist_coeffs):
     orig = np.array([[0], [0], [0.0001]])
-    x_vec = np.array([[1], [0], [0]]) * 152.0
-    y_vec = np.array([[0], [1], [0]]) * 152.0
-    z_vec = np.array([[0], [0], [1]]) * 152.0
+    x_vec = np.array([[1], [0], [0]]) * 137.0
+    y_vec = np.array([[0], [1], [0]]) * 76.25
+    z_vec = np.array([[0], [0], [1]]) * 76.25
 
     orig, _ = cv.projectPoints(orig, rvec, tvec, camera_matrix, dist_coeffs)
     x_vec, _ = cv.projectPoints(x_vec, rvec, tvec, camera_matrix, dist_coeffs)
@@ -417,7 +434,7 @@ def draw_coordinate_frame(img, rvec, tvec, camera_matrix, dist_coeffs):
     z_vec, _ = cv.projectPoints(z_vec, rvec, tvec, camera_matrix, dist_coeffs)
 
     cv.line(img, (int(orig[0][0][0]), int(orig[0][0][1])), (int(x_vec[0][0][0]), int(x_vec[0][0][1])), (255, 0, 0), 2)
-    cv.line(img, (int(orig[0][0][0]), int(orig[0][0][1])), (int(y_vec[0][0][0]), int(y_vec[0][0][1])), (0, 255, 0), 2)
+    cv.line(img, (int(orig[0][0][0]), int(orig[0][0][1])), (int(y_vec[0][0][0]), int(y_vec[0][0][1])), (255, 0, 0), 2)
     cv.line(img, (int(orig[0][0][0]), int(orig[0][0][1])), (int(z_vec[0][0][0]), int(z_vec[0][0][1])), (0, 0, 255), 2)
 
 
@@ -433,6 +450,9 @@ def max_error(corners, points_3D, rvec, tvec, camera_matrix, dist_coeffs,img):
     for i in range(4):
         error_sum += np.linalg.norm(projected_corners[i] - corners[i].pos)
         maxi = max(np.linalg.norm(projected_corners[i] - corners[i].pos), maxi)
+
+    draw_points(projected_corners, img, "below", (0,255,0))
+
     return maxi
 
 def min_dist(corners):
@@ -473,6 +493,13 @@ def get_involved_lines(corners):
         index_list.append(c.line2_index)
     return set(index_list)
 
+def distort_image(img, cam_mat, distortion_dist_coeffs, img_width, img_height):
+    new_cam_mat, roi = cv.getOptimalNewCameraMatrix(cam_mat, distortion_dist_coeffs, (img_width, img_height), 1, (img_width, img_height))
+    dst = cv.undistort(img, cam_mat, distortion_dist_coeffs, None, new_cam_mat)
+    x,y,w,h = roi
+    dst = dst[y:y+h, x:x+w]
+    return dst
+
 def estimate_pose(vid_path, scene_list_path):
     frame_indices = []
     frame_poses = []
@@ -481,6 +508,7 @@ def estimate_pose(vid_path, scene_list_path):
     video = cv.VideoCapture(vid_path)
     success, candidate_img = video.read()
     img = candidate_img
+    frame_count = int(video.get(cv.CAP_PROP_FRAME_COUNT))
 
     # get img size
     img_width = img.shape[1]
@@ -489,16 +517,17 @@ def estimate_pose(vid_path, scene_list_path):
     lower_bound, upper_bound = set_color_range(img, img_width, img_height)
 
     cut_frames = []
-    frame = 0
 
     with open(scene_list_path) as scene_file:
         file_reader = csv.reader(scene_file, delimiter=",")
+        i = 0
         for row in file_reader:
-            frame += 1
-            if frame > 2:
+            i+=1
+            if i > 2:
                 cut_frames.append(row[4])
 
     cut_frames = list(map(int, cut_frames))
+    cut_frames.append(int(frame_count))
     start_frame = 1
     frame = 1
     chosen_frame_index = 0
@@ -525,6 +554,12 @@ def estimate_pose(vid_path, scene_list_path):
                         max_pixels_in_bound = num_pixels_in_range
                         img = candidate_img
                         chosen_frame_index = frame
+       # print(2)
+
+        camera_matrix = np.array([(img_width, 0, img_width / 2),
+                                  (0, img_height, img_height / 2),
+                                  (0, 0, 1)])
+        img = distort_image(img, camera_matrix, np.array([[-1], [0], [0], [0]]), img_width, img_height)
 
         frame_indices.append(chosen_frame_index)
         start_frame = cut_frames[i]
@@ -549,6 +584,8 @@ def estimate_pose(vid_path, scene_list_path):
         translation_vector = [0,0,0]
         rotation_vector = [0,0,0]
 
+
+
         while hough_denominator <= max_hough_denominator:
             hough_denominator += 2
             defining_lines = get_defining_lines(contour_img, hough_denominator, img_width, img_height)
@@ -564,7 +601,7 @@ def estimate_pose(vid_path, scene_list_path):
 
             #in_bound_points, all_edges_reached = get_possible_points(intersections, bounding_box, img_height)
 
-         #   show_images([line_img])
+            show_images([line_img])
 
 
             if len(intersections) >= 4: #(all_edges_reached == True):
@@ -572,6 +609,7 @@ def estimate_pose(vid_path, scene_list_path):
               #  print(corners)
               #  show_images([line_img])
                 corners = reorder_corners(corners)
+                draw_points(corners, img, "above", (255,0,0))
 
                 #for i in range(2):
                 #corners, fix_successful = fix_occlusions(corners, in_bound_points, defining_lines)
@@ -595,22 +633,41 @@ def estimate_pose(vid_path, scene_list_path):
 
                 # make empty distance coefficients and estimate camera matrix
                 dist_coeffs = np.zeros((4, 1))
+               # retval, camera_matrix, dist_coeffs, rvecs, tvecs= cv.calibrateCamera(points_3D_, points_2D_, (img_height, img_width), None, None)
+               # print(camera_matrix, dist_coeffs)
+                print(dist_coeffs)
 
-                camera_matrix = np.array([(img_width, 0, img_width / 2),
-                                          (0, img_height, img_height / 2),
-                                          (0, 0, 1)])
+
+
+
+               # ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv.calibrateCamera(points_3D_, points_2D_,(img_height, img_width), None ,None)
+
+
+                show_images([img])
 
                 # estimate rotation vector and translation vector
                 success, rotation_vector, translation_vector, inliers = cv.solvePnPRansac(points_3D, points_2D, camera_matrix,
-                                                                                              dist_coeffs, flags=0)
+                                                                                              dist_coeffs, flags=cv.SOLVEPNP_P3P)
+                rotation_mat, _ = cv.Rodrigues(rotation_vector)
+                print(rotation_mat)
+                print(np.array([[0],[0],[1]]))
+                print(np.matmul(rotation_mat, np.array([[0],[0],[1]])))
+                if np.matmul(rotation_mat, np.array([[0],[0],[1]]))[1] > 0:
+                    m = [[1,0,0],[0,-1,0],[0,0,-1]]
+                    new_rotation_mat = np.matmul(rotation_mat, m)
+                    rotation_vector,_ = cv.Rodrigues(new_rotation_mat)
+                print(rotation_vector, translation_vector)
 
 
                 get_involved_lines(corners)
 
                 max_err = max_error(corners, points_3D, rotation_vector, translation_vector, camera_matrix, dist_coeffs, img)
-                for p in points_2D:
-                    cv.circle(img, (int(p[0]), int(p[1])), 3, (0, 255, 0), -1)
-               #show_images([img])
+
+              #  draw_points(points_2D, img, "above", (0,255,0))
+                print(translation_vector)
+
+                draw_coordinate_frame(img, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
+                show_images([img])
 
                 #check if the projection is reasonable
                 if (max_err < img_height/15) and (min_dist(corners) > img_height/10) and (len(get_involved_lines(corners)) == 4):
@@ -692,6 +749,6 @@ if __name__ == "__main__":
 
     for vid in os.listdir(video_dir):
         pose_list, frame_indices, cam_mat, dist_coeffs = estimate_pose(video_dir + "/" + vid, scene_list_dir + "/" + vid[:-4] + ".csv")
-       # show_poses(pose_list, frame_indices, video_dir + "/" + vid, cam_mat, dist_coeffs)
+        show_poses(pose_list, frame_indices, video_dir + "/" + vid, cam_mat, dist_coeffs)
         create_dataset(pose_estimation_dir, vid[:-4], pose_list)
         break
