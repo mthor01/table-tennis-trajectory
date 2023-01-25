@@ -1,3 +1,5 @@
+# you shouldnt look into this script as its the old one for doing it with trajectory planes
+
 import h5py
 import numpy as np
 import cv2 as cv

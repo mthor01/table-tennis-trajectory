@@ -1,7 +1,7 @@
 import os
 import re
 import h5py
-from classes.camera import camera
+from classes import camera
 import matplotlib.pyplot as plt
 import numpy as np
 from functions import cam_to_wrld
