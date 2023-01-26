@@ -4,9 +4,8 @@ import h5py
 from classes import camera
 import matplotlib.pyplot as plt
 import numpy as np
-from functions import cam_to_wrld
+from classes import functions
 import math
-from functions import calc_vec_angle
 import matplotlib
 import gi
 import seaborn as sn
@@ -47,10 +46,10 @@ def calc_per_angle_avg_errors(errors, poses, angle):
     heat_map_counter = np.zeros((9,9))
     for i in range(len(errors)):
         if poses[i].valid:
-            wrld_cam_vec = cam_to_wrld(poses[i], [0, 0, 1]) - cam_to_wrld(poses[i], [0, 0, 0])
-            vertical_cam_angle = calc_vec_angle(wrld_cam_vec, [wrld_cam_vec[0], wrld_cam_vec[1], 0])
-            horizontal_cam_angle = calc_vec_angle([wrld_cam_vec[0], wrld_cam_vec[1]], [0, 1])
-            trajectory_to_cam_angle = calc_vec_angle([wrld_cam_vec[0], wrld_cam_vec[1]], [math.cos(float(angle)), math.sin(float(angle))])
+            wrld_cam_vec = functions.cam_to_wrld(poses[i], [0, 0, 1]) - functions.cam_to_wrld(poses[i], [0, 0, 0])
+            vertical_cam_angle = functions.calc_vec_angle(wrld_cam_vec, [wrld_cam_vec[0], wrld_cam_vec[1], 0])
+            horizontal_cam_angle = functions.calc_vec_angle([wrld_cam_vec[0], wrld_cam_vec[1]], [0, 1])
+            trajectory_to_cam_angle = functions.calc_vec_angle([wrld_cam_vec[0], wrld_cam_vec[1]], [math.cos(float(angle)), math.sin(float(angle))])
 
             if trajectory_to_cam_angle > 90:
                 trajectory_to_cam_angle = 180-trajectory_to_cam_angle
@@ -68,10 +67,6 @@ def calc_per_angle_avg_errors(errors, poses, angle):
             trajectory_angle_counter[abs(math.floor(trajectory_to_cam_angle / 10))] += 1
             heat_map[abs(math.floor(vertical_cam_angle/10)), abs(math.floor(horizontal_cam_angle/10))] += errors[i]
             heat_map_counter[abs(math.floor(vertical_cam_angle/10)), abs(math.floor(horizontal_cam_angle/10))] += 1
-
-            if i == 409 or i == 529:
-                print(vertical_cam_angle)
-                print(horizontal_cam_angle)
 
 
 
@@ -143,14 +138,10 @@ if __name__ == "__main__":
     for i in range(len(heatmap)):
         heatmap[i] = divide_arrays(heatmap[i], heatmap_counter[i])
 
-  #  print(per_vid_errors)
-
-
 
     bar_x_axe = (np.array(range(9))+1) * 10
     fig1 = plt.figure()
     plt.bar(bar_x_axe, total_vertical_angle_errors)
-    print(total_vertical_angle_errors)
     plt.ylabel("AVG Euclid Error")
     plt.xlabel("Angle between camera viewing direction and net")
     fig2 = plt.figure()
@@ -160,7 +151,7 @@ if __name__ == "__main__":
     fig3 = plt.figure()
     plt.bar(bar_x_axe, total_trajectory_angle_errors)
     plt.ylabel("AVG Euclid Error")
-    plt.xlabel("Smallest angle between camera viewing direction and trajectory")
+    plt.xlabel("Angle on x,y plane between camera viewing direction and trajectory")
     fig4 = plt.figure()
     ax = sn.heatmap(heatmap, linewidth=0.5, xticklabels=bar_x_axe, yticklabels=bar_x_axe)
 

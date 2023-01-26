@@ -1,8 +1,8 @@
 import numpy as np
 import cv2 as cv
 import math
-from scipy.integrate import odeint
 import random
+import time
 
 #stores the coordinates of an intersection point as well as the lines that created it
 class intersec_point:
@@ -78,6 +78,7 @@ class simulation:
         self.time_elapsed = 0
         self.time_since_bounce = 10
         self.table_height = 0
+        self.start_time = time.time()
 
 
 
@@ -89,20 +90,30 @@ class simulation:
 
     # step the ball's position and self.velocity subject to an acceleration computed from all forces
     def dt_state(self, state, dt, a, drag, FM, buoyancy):
-        axe, daxe = state
-        ddaxe = a + (-drag + FM + buoyancy) / self.mass
-        return daxe, ddaxe
+        pos, vel = state
+        acceleration = a + (-drag + FM + buoyancy)/self.mass
+        vel = vel + acceleration * dt
+        pos = pos + vel*dt
+
+        return pos, vel
 
     # simply reflects the ball when it hits walls
     # if it hits the table or ground, a realistic bounce is applied
     def bounds_check(self):
         hit = False
         if self.position[0] - self.radius < 0:
-            self.velocity[0] = abs(self.velocity[0])
-            hit = True
+         #   self.velocity[0] = abs(self.velocity[0])
+            self.velocity[0] = 3
+            self.velocity[2] = abs(self.position[2]-1)*4
+            self.angular_velocity = [0.0001, 0, 0]
+
+            #hit = True
         if self.position[0] + self.radius > self.table_length:
-            self.velocity[0] = -abs(self.velocity[0])
-            hit = True
+            #self.velocity[0] = -abs(self.velocity[0])
+            self.velocity[0] = -3
+            self.velocity[2] = abs(self.position[2] - 1)*4
+            self.angular_velocity = [0.0001, 0, 0]
+            #hit = True
         if (self.position[2] - self.radius < self.table_height):
             in_x_bounds = 0 < self.position[0] < self.table_length
             in_y_bounds = 0 < self.position[1] < self.table_width
@@ -201,6 +212,7 @@ class simulation:
     # execute one step of length dt and update the ball
     def step(self, dt):
         """execute one time step of length dt and update state"""
+        self.start_time = time.time()
         self.state_x = self.position[0], self.velocity[0]
         self.state_y = self.position[1], self.velocity[1]
         self.state_z = self.position[2], self.velocity[2]
@@ -208,9 +220,9 @@ class simulation:
         self.FM = self.get_magnus_force()
         FD = self.get_drag()
 
-        self.state_x = odeint(self.dt_state, self.state_x, [0, dt], args=(0, FD[0], self.FM[0], 0))[1]
-        self.state_y = odeint(self.dt_state, self.state_y, [0, dt], args=(0, FD[1], self.FM[1], 0))[1]
-        self.state_z = odeint(self.dt_state, self.state_z, [0, dt], args=(self.gravity, FD[2], self.FM[2], self.buoyancy))[1]
+        self.state_x = self.dt_state(self.state_x, dt, 0, FD[0], self.FM[0], 0)
+        self.state_y = self.dt_state(self.state_y, dt, 0, FD[1], self.FM[1], 0)
+        self.state_z = self.dt_state(self.state_z, dt, self.gravity, FD[2], self.FM[2], self.buoyancy)
 
         self.position[0], self.velocity[0] = self.state_x
         self.position[1], self.velocity[1] = self.state_y
@@ -227,7 +239,7 @@ class simulation:
 
 class functions:
     #converts camera coordinates to world coordinates
-    def cam_to_wrld(self, cam, cam_coord):
+    def cam_to_wrld(cam, cam_coord):
         extrinsics = np.concatenate((cam.extrinsics, [np.array([0, 0, 0, 1])]), axis=0)
         extrinsics = np.linalg.inv(extrinsics)
         homo_cam_coord = np.array([[cam_coord[0]], [cam_coord[1]], [cam_coord[2]], [1]])
@@ -236,7 +248,7 @@ class functions:
         return np.array([wrld_coord[0][0], wrld_coord[1][0], wrld_coord[2][0]])
 
     # converts world coordinates to camera coordinates
-    def wrld_to_cam(self, cam, wrld_coord):
+    def wrld_to_cam(cam, wrld_coord):
         extrinsics = np.concatenate((cam.extrinsics, [np.array([0, 0, 0, 1])]), axis=0)
         extrinsics = extrinsics
         homo_wrld_coord = np.array([[wrld_coord[0]], [wrld_coord[1]], [wrld_coord[2]], [1]])
@@ -245,7 +257,7 @@ class functions:
         return np.array([cam_coord[0], cam_coord[1], cam_coord[2]])
 
     # calculate angle between 2 vectors
-    def calc_vec_angle(self, vec1, vec2):
+    def calc_vec_angle(vec1, vec2):
         return math.acos(np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))) / math.pi * 180
 
 # holds a population of ball start values and can update it
@@ -275,11 +287,11 @@ class population():
             self.rpm = random.uniform(0, 1000)
             self.angular_velocities.append(self.rotation_axes[i] * self.rpm * 2 * math.pi / 60)
 
-            self.positions.append([1, 1, 1])
-            self.velocities.append([1, 1, 1])
-            self.rotation_axes.append([1, 1, 1])
-            self.rpm = 1
-            self.angular_velocities.append(self.rotation_axes[i] * self.rpm * 2 * math.pi / 60)
+          #  self.positions.append([1, 1, 1])
+           # self.velocities.append([1, 1, 1])
+            #self.rotation_axes.append([1, 1, 1])
+            #self.rpm = 1
+            #self.angular_velocities.append(self.rotation_axes[i] * self.rpm * 2 * math.pi / 60)
 
     def new_gen(self):
         self.position_candidates = []
@@ -298,7 +310,6 @@ class population():
                     vectors[i][j] = trial_vec[j]
 
             self.position_candidates.append(vectors[i][0:3])
-            #  print(vectors[i][0:])
             self.velocity_candidates.append(vectors[i][3:6])
             self.angular_velocity_candidates.append(vectors[i][6:9])
 
@@ -315,8 +326,6 @@ class population():
 
     def update(self, candidate_performances):
         for i in range(self.NH):
-            # print(candidate_performances)
-            # print(self.performances)
             if candidate_performances[i] < self.performances[i]:
                 self.positions[i] = self.position_candidates[i]
                 self.velocities[i] = self.velocity_candidates[i]

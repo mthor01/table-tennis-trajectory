@@ -8,13 +8,24 @@ import math
 from matplotlib import animation
 import h5py
 import os
-from classes import simulation
+from classes_1 import simulation
 
 matplotlib.use("WebAgg")
 
 table_length = 2.74  # m
 table_width = 1.525  # m
 net_height = 0.15 # m
+
+#test_speeds = np.array([2., 2.5, 3., 3.5 ])
+#test_angles = np.array([-50,-40, -30, -20, -10, 0, 10, 20, 30, 40, 50]) * math.pi / 180
+#start_positions_y = np.linspace(0, table_width, 5)
+#start_positions_z = [0.2,0.4,0.6]
+test_speeds = np.array([5.])
+test_angles = np.array([0])
+test_z_speeds = np.array([-2])
+start_positions_x = np.array([0.02])
+start_positions_y = np.array([table_width/2])
+start_positions_z = np.array([0.5])
 
 def display_animation(data):
     fig = plt.figure()
@@ -71,29 +82,26 @@ def clear_dir(path):
 if __name__ == "__main__":
     sim = simulation()
     dt = 1/100
-
-    test_speeds = np.array([2., 2.5, 3., 3.5 ])
-    test_angles = np.array([-50,-40, -30, -20, -10, 0, 10, 20, 30, 40, 50]) * math.pi / 180
-    start_positions_y = np.linspace(0, table_width, 5)
-    start_positions_z = [0.2,0.4,0.6]
     num_samples = 0
 
 
     clear_dir("simulated_ball_data/bounce_frames")
     clear_dir("simulated_ball_data/positions")
 
-    for values in itertools.product(test_speeds, test_angles, start_positions_y, start_positions_z):
+    for values in itertools.product(test_speeds, test_angles,start_positions_x, start_positions_y, start_positions_z, test_z_speeds):
         speed = values[0]
         angle = values[1]
-        X0 = 0
-        Y0 = values[2]
-        Z0 = values[3]
+        X0 = values[2]
+        Y0 = values[3]
+        Z0 = values[4]
+        z_speed = values[5]
         rotation_axis = [0,0,0]
         rpm = 0
        # speed, angle, Y0, Z0, rotation_axis, rpm = 3, 0, table_width/2, 0.5, [0,0,0], 0
 
         vel = [math.cos(angle), math.sin(angle), 0]
         vel =  vel / np.linalg.norm(vel) * speed
+        vel = [vel[0], vel[1], z_speed]
 
         sim = simulation([X0, Y0, Z0], vel, rotation_axis, rpm)
 
@@ -105,11 +113,12 @@ if __name__ == "__main__":
         last_ball_x_vel = sim.velocity[0]
         data = []
         bounces = []
+        hits = []
 
         # execute the simulation for given values and store the ball positions
         # it stops after 2 bounces
         # only stores if the simulation did not interrupt the loop with break_loop
-        while j<5:
+        while i<200:
             i += 1
             break_loop = False
             for _ in range(3):
@@ -125,25 +134,29 @@ if __name__ == "__main__":
                 bounces.append(i)
 
             if (last_ball_x_vel*sim.velocity[0] < 0):
+                hits.append(i)
                 hit_counter+=1
 
             last_ball_z_vel = sim.velocity[2]
             last_ball_x_vel = sim.velocity[0]
 
-            if bounce_counter >= 2:
-                if sim.position[0] < table_length/2:
-                    break_loop = True
+            if hit_counter >= 2:
                 j+=1
+
+           # if bounce_counter >= 10:
+               # if sim.position[0] < table_length/2:
+                 #break_loop = True
+            #    j+=1
 
 
 
         #display_animation(np.transpose(data))
-        print(break_loop)
 
         if break_loop == False:
             num_samples+=1
             create_dataset("simulated_ball_data/bounce_frames", "speed=" + str(speed) + "_angle=" + str(angle/math.pi*180), bounces)
             create_dataset("simulated_ball_data/positions", "speed=" + str(speed) + "_angle=" + str(angle/math.pi*180), data)
+            create_dataset("simulated_ball_data/hit_frames", "speed=" + str(speed) + "_angle=" + str(angle / math.pi * 180), hits)
 
 
 

@@ -1,6 +1,8 @@
 # this script takes 2d ball positions and camera poses for every frame and predicts the 3d world coordinates of the ball
 # with the middle of the table being the origin
 # it is not finished and contains bugs
+# it also takes too long to compute, as i have not parallelised the simulations of one population yet
+# that is why i set NG and NH very low
 
 import cv2 as cv
 import numpy as np
@@ -10,20 +12,26 @@ from matplotlib import animation
 import h5py
 import os
 from classes import simulation, population, camera
+import time
 
 pose_dir = "pose_estimates"
 trajectory_dir = "simulated_ball_data/positions"
 bounce_dir = "simulated_ball_data/bounce_frames"
+hit_dir = "simulated_ball_data/hit_frames"
 output_dir = "3d_ball_positions"
 
 table_length = 2.74  # m
 table_width = 1.525  # m
 net_height = 0.15  # m
 
+NG = 1
+NH = 5
+
 
 #converts positions in sim space to the desired system where the middle of the table is the origin
 def convert_sim_data(positions, bounces, n_frames, poses):
     n_positions = len(positions)
+    n_bounces = len(bounces)
     new_set_frames = [len(positions)] * int(round(n_frames/len(positions))+1)
     positions_2d = []
     positions_3d = []
@@ -33,7 +41,9 @@ def convert_sim_data(positions, bounces, n_frames, poses):
 
     while n_frames > len(positions):
         positions = np.concatenate((positions, positions), 0)
-        bounces = np.concatenate((bounces, [bounces[0]+n_positions, bounces[1]+n_positions]), 0)
+        bounces = np.concatenate((bounces, bounces + len(bounces)/n_bounces*n_positions), 0)
+        bounces = bounces.astype("int")
+
 
     for i in range(n_frames):
         pos_3d = ((positions[i][0] - 2.74 / 2) * 100, (positions[i][1] - 1.525 / 2) * 100, positions[i][2] * 100)
@@ -117,17 +127,19 @@ def clear_dir(path):
     for f in os.listdir(path):
         os.remove(path + "/" + f)
 
+#
 def simulate_trajectory(start_pos, speed, angular_velocity, framerate, num_frames):
     rotation_axis = angular_velocity / np.linalg.norm(angular_velocity)
     rpm = np.linalg.norm(angular_velocity) / (2 * math.pi /60)
     sim = simulation(start_pos, speed, rotation_axis, rpm)
-    dt = 1/framerate * 10
+    dt = 1/framerate * 3
     positions = []
 
-    for i in range(num_frames*10):
+    for i in range(num_frames*3):
         x, y, z, wall_hit = sim.step(dt)
-        if i%10 == 0:
+        if i%3 == 0:
             positions.append([x,y,z])
+
 
     return positions
 
@@ -146,10 +158,10 @@ def spot_racket_hits(positions, poses):
         table_orientation = project_2d([0,0,0], poses[i])[0][0] - project_2d([1,0,0], poses[i])[0][0]
         vel_1 = positions[i-2]-positions[i-1]
         vel_2 = positions[i-1]-positions[i]
-        vel_1 = np.dot(vel_1, table_orientation) / np.linalg.norm(table_orientation)
-        vel_2 = np.dot(vel_2, table_orientation) / np.linalg.norm(table_orientation)
+        speed_1 = np.dot(vel_1, table_orientation) / np.linalg.norm(table_orientation)
+        speed_2 = np.dot(vel_2, table_orientation) / np.linalg.norm(table_orientation)
 
-        if (vel_1 - vel_2) > 0.5:
+        if ((speed_1 * speed_2) < 0) and (abs(speed_1-speed_2) > 2) and (vel_1[1] > 0):
             racket_hit_frames.append(i-1)
     return racket_hit_frames
 
@@ -171,9 +183,15 @@ def test_population_performance(positions, velocities, angular_velocities, traje
             best_individual_performance = avg_performance
             best_individual_positions = individual_positions
 
-    print(best_individual_performance)
-
     return population_performances, best_individual_positions
+
+def test_3d_to_2d(video_path, point_list, n):
+    video = cv.VideoCapture(video_path)
+    success, img = video.read()
+    for i in range(n):
+        img = cv.circle(img, (int(point_list[i][0]), int(point_list[i][1])), 3, (0, 0, 255), -1)
+    cv.imshow("img", img)
+    cv.waitKey(0)
 
 if __name__ == "__main__":
     for f in os.listdir(output_dir):
@@ -197,6 +215,10 @@ if __name__ == "__main__":
             a_group_key = list(bounce_frames_file.keys())[0]
             bounces = bounce_frames_file[a_group_key][()]
 
+            hit_frames_file = h5py.File(hit_dir + "/" + trajectory)
+            a_group_key = list(hit_frames_file.keys())[0]
+            hit_frames = hit_frames_file[a_group_key][()]
+
             n_frames = len(poses_)
             poses = []
             ballpos = []
@@ -208,8 +230,7 @@ if __name__ == "__main__":
             final_candidates = []
             error_sum = 0
             error_denominator = 0
-            NG = 300
-            NH = 72
+
 
 
 
@@ -225,23 +246,32 @@ if __name__ == "__main__":
 
             racket_hits = spot_racket_hits(ballpos, poses)
 
+            #test_3d_to_2d("/home/mthor9/Schreibtisch/uni/bachelorarbeit/table_tennis_code/table-tennis-trajectory/single_test_vid/5.mp4", ballpos, 100)
+
             last_hit = -1
+            start_time = time.time()
             for hit_frame in racket_hits:
                 trajectory_2d = ballpos[last_hit+1:hit_frame]
-                pop = population()
-                population_performances, _ = test_population_performance(pop.positions, pop.velocities, pop.angular_velocities, trajectory_2d)
-                pop.performances = population_performances
+                if len(trajectory_2d) > 0:
+                    pop = population(NH=NH)
+                    population_performances, _ = test_population_performance(pop.positions, pop.velocities, pop.angular_velocities, trajectory_2d)
+                    pop.performances = population_performances
 
-                for i in range(NG):
-                    pop.new_gen()
-                    population_performances, best_pos_estimations = test_population_performance(pop.position_candidates, pop.velocity_candidates, pop.angular_velocity_candidates, trajectory_2d)
-                    pop.update(population_performances)
+                    for i in range(NG):
+                        pop.new_gen()
+                        population_performances, best_pos_estimations = test_population_performance(pop.position_candidates, pop.velocity_candidates, pop.angular_velocity_candidates, trajectory_2d)
+                        pop.update(population_performances)
+
+                    if final_wrld_pos == []:
+                        final_wrld_pos = best_pos_estimations
+                    else:
+                        final_wrld_pos = np.concatenate((final_wrld_pos, best_pos_estimations), 0)
+
+                    last_hit = hit_frame
 
 
-                final_wrld_pos.append(best_pos_estimations)
-
-
-                last_hit = hit_frame
+        f = h5py.File("3d_ball_positions" + "/" + vid[:-5] + "_" + trajectory, "w")
+        dset = f.create_dataset(vid[:-4] + "_" + trajectory + ".hdf5", data=final_wrld_pos)
 
 
 

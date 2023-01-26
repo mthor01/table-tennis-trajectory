@@ -1,6 +1,7 @@
 # this script estimates camera poses for every frame in every video from the video directory
 # these poses are stored in the pose estimates directory
 # executing this script will first delete everything that was previously stored in the estimates directory
+# use show_images(<array_of_images>) at any point to look at desired images
 
 import csv
 import numpy as np
@@ -425,8 +426,11 @@ def reorder_corners(corners):
         if not ((corners[i].line1_index in corner_0_lines) or (corners[i].line2_index in corner_0_lines)):
             new_corners[1] = corners[i]
         else:
-            new_corners[x] = corners[i]
-            x += 1
+            if x > 3:
+                new_corners[1] = corners[i]
+            else:
+                new_corners[x] = corners[i]
+                x += 1
 
     for i in range(4):
         if new_corners[i] == 0:
@@ -559,6 +563,7 @@ def estimate_poses(vid_path, scene_list_path):
                 too_many_lines = True
 
             line_img = draw_lines(defining_lines, img)
+           # show_images([line_img])
             intersections = get_intersections(defining_lines, img_width, img_height)
 
             if len(intersections) >= 4:
@@ -572,23 +577,24 @@ def estimate_poses(vid_path, scene_list_path):
                                       corners[3].pos_tuple()], dtype="double")
 
                 # estimate pose given by rotation vector and translation vector
-                success, rotation_vector, translation_vector, inliers = cv.solvePnPRansac(points_3D, points_2D,
+                success, rotation_vector, translation_vector = cv.solvePnP(points_3D,
+                                                                                          points_2D,
                                                                                           camera_matrix,
                                                                                           dist_coeffs,
-                                                                                          flags=cv.SOLVEPNP_P3P)
+                                                                                          flags=cv.SOLVEPNP_ITERATIVE)
                 #rotate the prediction if the z axis is pointing downwards
                 rotation_mat, _ = cv.Rodrigues(rotation_vector)
+                projected_corners = project_points_on_image(points_3D, rotation_vector, translation_vector,
+                                                            camera_matrix, dist_coeffs)
+                draw_points(projected_corners, img, "below", (0, 255, 0))
+
                 if np.matmul(rotation_mat, np.array([[0], [0], [1]]))[1] > 0:
                     m = [[1, 0, 0], [0, -1, 0], [0, 0, -1]]
                     new_rotation_mat = np.matmul(rotation_mat, m)
                     rotation_vector, _ = cv.Rodrigues(new_rotation_mat)
 
-                get_involved_lines(corners)
-                projected_corners = project_points_on_image(points_3D, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
-                draw_points(projected_corners, img, "below", (0, 255, 0))
-
                 draw_coordinate_frame(img, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
-              #  show_images([img])
+                #show_images([img])
 
                 # check if the pose is reasonable, by reprojecting the given 3D corners on the image
                 # and comparing them with the estimated corners
