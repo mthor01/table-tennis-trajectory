@@ -1,27 +1,28 @@
-#this script detects cuts in videos stored in a defined video directory
-#the frames on which cuts happen are stored in a scene list directory
-#executing this script will also clean any previously stored data in the scene list directory
+"""
+This script detects cuts in videos stored in a defined video directory.
+The frames in which cuts happen are stored in a scene frame directory.
+Executing this script will also clean any previously stored data in the scene list directory.
+"""
 
 import scenedetect
-import os
+from pathlib import Path
 from scenedetect import SceneManager, open_video, ContentDetector
 
-video_dir = "single_test_vid"
-scene_list_dir = "scene_lists"
+VIDEO_DIR = Path("single_test_vid")
+SCENE_FRAMES_DIR = Path("scene_lists")
 
-threshold = 8.0
-min_scene_length = 0
+THRESHOLD = 8.0
+MIN_SCENE_LENGTH = 0
 
 if __name__ == "__main__":
-    for f in os.listdir(scene_list_dir):
-        os.remove(scene_list_dir + "/" + f)
+    for f in SCENE_FRAMES_DIR.glob("*"):
+        Path(f).unlink()
 
-    for video_name in os.listdir(video_dir):
-        video = open_video(video_dir + "/" + video_name)
+    for video_name in VIDEO_DIR.glob("*.mp4"):
+        video = open_video(str(video_name))
         scene_manager = SceneManager()
-        scene_manager.add_detector(
-            ContentDetector(threshold=threshold, min_scene_len=min_scene_length))
+        scene_manager.add_detector(ContentDetector(threshold=THRESHOLD, min_scene_len=MIN_SCENE_LENGTH))
         scene_manager.detect_scenes(video)
         scene_list = scene_manager.get_scene_list()
-        with open(scene_list_dir + "/" + video_name[:-4] + ".csv", "wt") as scene_list_file:
+        with open(str(Path(SCENE_FRAMES_DIR, video_name.stem)) + ".csv", "wt") as scene_list_file:
             scenedetect.scene_manager.write_scene_list(scene_list_file, scene_list)

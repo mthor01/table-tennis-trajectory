@@ -1,22 +1,21 @@
 import os
 import re
 import h5py
-from classes import camera
+from classes import Camera
 import matplotlib.pyplot as plt
 import numpy as np
-from classes import functions
-import math
+from functions import cam_to_wrld, calc_vec_angle
 import matplotlib
 import gi
 import seaborn as sn
+from math import floor, sin, cos
 
 gi.require_version('Gtk', '3.0')
-
 matplotlib.use("WebAgg")
 
-original_data_dir = "simulated_ball_data/positions"
-estimated_pos_dir = "3d_ball_positions"
-pose_dir = "pose_estimates"
+ORIGINAL_DATA_DIR = "simulated_ball_data/positions"
+ESTIMATED_POS_DIR = "3d_ball_positions"
+POSE_DIR = "pose_estimates"
 
 def get_vid_name(path):
     name = ""
@@ -46,10 +45,10 @@ def calc_per_angle_avg_errors(errors, poses, angle):
     heat_map_counter = np.zeros((9,9))
     for i in range(len(errors)):
         if poses[i].valid:
-            wrld_cam_vec = functions.cam_to_wrld(poses[i], [0, 0, 1]) - functions.cam_to_wrld(poses[i], [0, 0, 0])
-            vertical_cam_angle = functions.calc_vec_angle(wrld_cam_vec, [wrld_cam_vec[0], wrld_cam_vec[1], 0])
-            horizontal_cam_angle = functions.calc_vec_angle([wrld_cam_vec[0], wrld_cam_vec[1]], [0, 1])
-            trajectory_to_cam_angle = functions.calc_vec_angle([wrld_cam_vec[0], wrld_cam_vec[1]], [math.cos(float(angle)), math.sin(float(angle))])
+            wrld_cam_vec = cam_to_wrld(poses[i], [0, 0, 1]) - cam_to_wrld(poses[i], [0, 0, 0])
+            vertical_cam_angle = calc_vec_angle(wrld_cam_vec, [wrld_cam_vec[0], wrld_cam_vec[1], 0])
+            horizontal_cam_angle = calc_vec_angle([wrld_cam_vec[0], wrld_cam_vec[1]], [0, 1])
+            trajectory_to_cam_angle = calc_vec_angle([wrld_cam_vec[0], wrld_cam_vec[1]], [cos(float(angle)), sin(float(angle))])
 
             if trajectory_to_cam_angle > 90:
                 trajectory_to_cam_angle = 180-trajectory_to_cam_angle
@@ -59,14 +58,14 @@ def calc_per_angle_avg_errors(errors, poses, angle):
             if horizontal_cam_angle > 90:
                 horizontal_cam_angle = 180-horizontal_cam_angle
 
-            horizontal_angle_errors[abs(math.floor(horizontal_cam_angle/10))] += errors[i]
-            horizontal_angle_counter[abs(math.floor(horizontal_cam_angle/10))] += 1
-            vertical_angle_errors[abs(math.floor(vertical_cam_angle/10))] += errors[i]
-            vertical_angle_counter[abs(math.floor(vertical_cam_angle/10))] += 1
-            trajectory_angle_errors[abs(math.floor(trajectory_to_cam_angle / 10))] += errors[i]
-            trajectory_angle_counter[abs(math.floor(trajectory_to_cam_angle / 10))] += 1
-            heat_map[abs(math.floor(vertical_cam_angle/10)), abs(math.floor(horizontal_cam_angle/10))] += errors[i]
-            heat_map_counter[abs(math.floor(vertical_cam_angle/10)), abs(math.floor(horizontal_cam_angle/10))] += 1
+            horizontal_angle_errors[abs(floor(horizontal_cam_angle/10))] += errors[i]
+            horizontal_angle_counter[abs(floor(horizontal_cam_angle/10))] += 1
+            vertical_angle_errors[abs(floor(vertical_cam_angle/10))] += errors[i]
+            vertical_angle_counter[abs(floor(vertical_cam_angle/10))] += 1
+            trajectory_angle_errors[abs(floor(trajectory_to_cam_angle / 10))] += errors[i]
+            trajectory_angle_counter[abs(floor(trajectory_to_cam_angle / 10))] += 1
+            heat_map[abs(floor(vertical_cam_angle/10)), abs(floor(horizontal_cam_angle/10))] += errors[i]
+            heat_map_counter[abs(floor(vertical_cam_angle/10)), abs(floor(horizontal_cam_angle/10))] += 1
 
 
 
@@ -96,20 +95,20 @@ if __name__ == "__main__":
     total_trajectory_angle_errors = np.zeros(9)
     total_trajectory_angle_counter = np.zeros(9)
 
-    for estimated_pos_file in os.listdir(estimated_pos_dir):
+    for estimated_pos_file in os.listdir(ESTIMATED_POS_DIR):
         poses = []
         trajectory_errors = []
 
         velocity, trajectory_angle = re.findall("\d+\.\d+", estimated_pos_file)[-2], re.findall("\d+\.\d+", estimated_pos_file)[-1]
         vid_name = get_vid_name(estimated_pos_file)
 
-        estimated_pos = get_data(estimated_pos_dir + "/" + estimated_pos_file)
-        org_pos = get_data(original_data_dir + "/" + estimated_pos_file[len(vid_name)+1 :])
+        estimated_pos = get_data(ESTIMATED_POS_DIR + "/" + estimated_pos_file)
+        org_pos = get_data(ORIGINAL_DATA_DIR + "/" + estimated_pos_file[len(vid_name)+1 :])
         org_pos = correct_positions(org_pos)
-        poses_ = get_data(pose_dir + "/" + vid_name + ".hdf5")
+        poses_ = get_data(POSE_DIR + "/" + vid_name + ".hdf5")
 
         for pose in poses_:
-            poses.append(camera([pose[0], pose[1], pose[2]], [pose[3], pose[4], pose[5]], pose[6],pose[7], pose[8]))
+            poses.append(Camera([pose[0], pose[1], pose[2]], [pose[3], pose[4], pose[5]], pose[6],pose[7], pose[8]))
 
         for i in range(len(estimated_pos)):
             trajectory_errors.append(np.linalg.norm(estimated_pos[i] - org_pos[i % len(org_pos)]))
@@ -143,15 +142,15 @@ if __name__ == "__main__":
     fig1 = plt.figure()
     plt.bar(bar_x_axe, total_vertical_angle_errors)
     plt.ylabel("AVG Euclid Error")
-    plt.xlabel("Angle between camera viewing direction and net")
+    plt.xlabel("Angle between Camera viewing direction and net")
     fig2 = plt.figure()
     plt.bar(bar_x_axe, total_horizontal_angle_errors)
     plt.ylabel("AVG Euclid Error")
-    plt.xlabel("Angle between camera viewing direction and table plane")
+    plt.xlabel("Angle between Camera viewing direction and table plane")
     fig3 = plt.figure()
     plt.bar(bar_x_axe, total_trajectory_angle_errors)
     plt.ylabel("AVG Euclid Error")
-    plt.xlabel("Angle on x,y plane between camera viewing direction and trajectory")
+    plt.xlabel("Angle on x,y plane between Camera viewing direction and trajectory")
     fig4 = plt.figure()
     ax = sn.heatmap(heatmap, linewidth=0.5, xticklabels=bar_x_axe, yticklabels=bar_x_axe)
 

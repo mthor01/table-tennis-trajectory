@@ -1,20 +1,26 @@
-# this script estimates camera poses for every frame in every video from the video directory
-# these poses are stored in the pose estimates directory
-# executing this script will first delete everything that was previously stored in the estimates directory
-# use show_images(<array_of_images>) at any point to look at desired images
+"""
+This script estimates camera poses for every frame in every video from the video directory.
+These poses are stored in the pose estimates directory.
+Executing this script will first delete everything that was previously stored in the estimates directory
+Use show_images(<array_of_images>) at any point to have a look at desired images
+"""
 
 import csv
 import numpy as np
 import cv2 as cv
 import math
 import copy
-import os
 import h5py
-from classes import intersec_point, line, bounds
+from classes import IntersecPoint, Line, Bounds
+from numpy.linalg import norm
+from numpy import concatenate, array, transpose
+from tqdm import tqdm
+from pathlib import Path
+from functions import clear_dir
 
-scene_list_dir = "scene_lists"
-video_dir = "single_test_vid"
-pose_estimation_dir = "pose_estimates"
+SCENE_FRAMES_DIR = Path("scene_lists")
+VIDEO_DIR = Path("single_test_vid")
+POSE_ESTIMATION_DIR = Path("pose_estimates")
 
 
 # returns the amount of pixels in a given color range
@@ -46,11 +52,11 @@ def set_color_range(img):
                     green_counter += 1
 
     if blue_counter >= green_counter:
-        lower_bound = np.array([90, 30, 90])
-        upper_bound = np.array([135, 255, 255])
+        lower_bound = array([90, 30, 90])
+        upper_bound = array([135, 255, 255])
     else:
-        lower_bound = np.array([40, 30, 90])
-        upper_bound = np.array([75, 255, 255])
+        lower_bound = array([40, 30, 90])
+        upper_bound = array([75, 255, 255])
 
     return lower_bound, upper_bound
 
@@ -81,8 +87,8 @@ def get_defining_lines(edge_img, sensitivity):
             b = math.sin(theta)
             x0 = a * rho
             y0 = b * rho
-            pt1 = np.array([int(x0 + 1000 * (-b)), int(y0 + 1000 * (a))])
-            pt2 = np.array([int(x0 - 1000 * (-b)), int(y0 - 1000 * (a))])
+            pt1 = array([int(x0 + 1000 * (-b)), int(y0 + 1000 * (a))])
+            pt2 = array([int(x0 - 1000 * (-b)), int(y0 - 1000 * (a))])
             line_dir = pt2 - pt1
             line_dir_x = np.sign(line_dir[0]) * max(abs(line_dir[0]), 0.001)
             line_dir_y = np.sign(line_dir[1]) * max(abs(line_dir[1]), 0.001)
@@ -98,7 +104,7 @@ def get_defining_lines(edge_img, sensitivity):
             new_pt1_y = pt1 + line_dir * (-pt1[1] / line_dir_y)
 
             # choose new points,placed at the edges of the img, describing the lines
-            if np.linalg.norm(new_pt1_x) < np.linalg.norm(new_pt1_y):
+            if norm(new_pt1_x) < norm(new_pt1_y):
                 new_pt1 = new_pt1_x
                 new_pt2 = new_pt1 + line_dir * (img_width / line_dir_x)
             else:
@@ -110,23 +116,23 @@ def get_defining_lines(edge_img, sensitivity):
                 l_pt1 = l.pos1
                 l_pt2 = l.pos2
 
-                if np.linalg.norm(new_pt1 - l_pt1) > np.linalg.norm(new_pt1 - l_pt2):
+                if norm(new_pt1 - l_pt1) > norm(new_pt1 - l_pt2):
                     l_pt1, l_pt2 = l_pt2, l_pt1
 
-                dist_pt1 = np.linalg.norm(new_pt1 - l_pt1)
-                dist_pt2 = np.linalg.norm(new_pt2 - l_pt2)
+                dist_pt1 = norm(new_pt1 - l_pt1)
+                dist_pt2 = norm(new_pt2 - l_pt2)
 
                 if ((dist_pt1 < img_width / 20) and (dist_pt2 < img_width / 20)):
                     new = False
                     break
 
             if new:
-                reduced_lines.append(line(new_pt1, new_pt2, theta))
+                reduced_lines.append(Line(new_pt1, new_pt2, theta))
 
     return reduced_lines
 
 
-# returns the intersection point of 2 lines if is is inside of the image range (if not returns empty intersec_point)
+# returns the intersection point of 2 lines if is is inside of the image range (if not returns empty IntersecPoint)
 def get_single_intersection(line1, line2, img_width, img_height):
     da = line1.pos2 - line1.pos1
     db = line2.pos2 - line2.pos1
@@ -135,17 +141,17 @@ def get_single_intersection(line1, line2, img_width, img_height):
     dap = [0, 0]
     dap[0] = -da[1]
     dap[1] = da[0]
-    denom = np.dot(dap, db)
+    denom = dap @ db
 
     if denom == 0:
-        return intersec_point()
-    num = np.dot(dap, dp)
+        return IntersecPoint()
+    num = dap @ dp
     p = (num / denom) * db + line2.pos1
 
     if (p != [] and (p[0] >= 0) and (p[1] >= 0) and (p[0] <= img_width) and (p[1] <= img_height)):
-        return (intersec_point(np.array([int(p[0]), int(p[1])])))
+        return (IntersecPoint(array([int(p[0]), int(p[1])])))
     else:
-        return intersec_point()
+        return IntersecPoint()
 
 
 # calculate the intersection points of given lines and store their belonging lines indices
@@ -157,7 +163,7 @@ def get_intersections(lines, img_width, img_height):
             candidate_point = get_single_intersection(lines[i], lines[j], img_width, img_height)
 
             if len(candidate_point.pos) == 2:
-                intersection_points.append(intersec_point(candidate_point.pos, i, j))
+                intersection_points.append(IntersecPoint(candidate_point.pos, i, j))
 
     return intersection_points
 
@@ -166,9 +172,9 @@ def get_intersections(lines, img_width, img_height):
 def draw_points(points, img, text_position="above", color=[255, 0, 0]):
     new_points = []
 
-    if not isinstance(points[0], intersec_point):
+    if not isinstance(points[0], IntersecPoint):
         for i in range(len(points)):
-            new_points.append(intersec_point(points[i]))
+            new_points.append(IntersecPoint(points[i]))
     else:
         new_points = points
 
@@ -285,7 +291,7 @@ def get_table_contours(contours, min_second_size, img_width, img_height):
 def get_contour_bounds(contour):
     x, y, w, h = cv.boundingRect(contour)
 
-    return bounds(x, x + w, y, y + h)
+    return Bounds(x, x + w, y, y + h)
 
 
 # sort out points that are guranteed to be no table corners
@@ -348,7 +354,7 @@ def fix_occlusions(corners, in_bound_points, lines):
                 corner_indices.append(i)
             if (corners[i].line2_index in one_hit_lines):
                 possibly_wrong_corners.append(
-                    intersec_point(corners[i].pos, corners[i].line2_index, corners[i].line1_index))
+                    IntersecPoint(corners[i].pos, corners[i].line2_index, corners[i].line1_index))
                 corner_indices.append(i)
 
         corner_candidate_1 = get_single_intersection(lines[possibly_wrong_corners[0].line2_index],
@@ -356,8 +362,8 @@ def fix_occlusions(corners, in_bound_points, lines):
         corner_candidate_2 = get_single_intersection(lines[possibly_wrong_corners[0].line1_index],
                                                      lines[possibly_wrong_corners[1].line2_index])
 
-        candidate_1_dist = np.linalg.norm([corner_candidate_1.pos - possibly_wrong_corners[0].pos])
-        candidate_2_dist = np.linalg.norm([corner_candidate_2.pos - possibly_wrong_corners[1].pos])
+        candidate_1_dist = norm([corner_candidate_1.pos - possibly_wrong_corners[0].pos])
+        candidate_2_dist = norm([corner_candidate_2.pos - possibly_wrong_corners[1].pos])
 
         final_corners = corners
 
@@ -374,10 +380,10 @@ def fix_occlusions(corners, in_bound_points, lines):
 
 # draw a coordinate frame in an img
 def draw_coordinate_frame(img, rvec, tvec, camera_matrix, dist_coeffs):
-    orig = np.array([[0], [0], [0.0001]])
-    x_vec = np.array([[1], [0], [0]]) * 137.0
-    y_vec = np.array([[0], [1], [0]]) * 76.25
-    z_vec = np.array([[0], [0], [1]]) * 76.25
+    orig = array([[0], [0], [0.0001]])
+    x_vec = array([[1], [0], [0]]) * 137.0
+    y_vec = array([[0], [1], [0]]) * 76.25
+    z_vec = array([[0], [0], [1]]) * 76.25
 
     orig, _ = cv.projectPoints(orig, rvec, tvec, camera_matrix, dist_coeffs)
     x_vec, _ = cv.projectPoints(x_vec, rvec, tvec, camera_matrix, dist_coeffs)
@@ -393,7 +399,7 @@ def project_points_on_image(points_3D, rvec, tvec, camera_matrix, dist_coeffs):
     projected_corners = []
     for point in points_3D:
         projection, _ = (cv.projectPoints(point, rvec, tvec, camera_matrix, dist_coeffs))
-        projected_corners.append(np.array([projection[0][0][0], projection[0][0][1]], dtype="double"))
+        projected_corners.append(array([projection[0][0][0], projection[0][0][1]], dtype="double"))
 
     return projected_corners
 
@@ -403,8 +409,8 @@ def max_error(corners, projected_corners):
     error_sum = 0
 
     for i in range(4):
-        error_sum += np.linalg.norm(projected_corners[i] - corners[i].pos)
-        maxi = max(np.linalg.norm(projected_corners[i] - corners[i].pos), maxi)
+        error_sum += norm(projected_corners[i] - corners[i].pos)
+        maxi = max(norm(projected_corners[i] - corners[i].pos), maxi)
 
     return maxi
 
@@ -413,7 +419,7 @@ def min_dist(points):
     min_dist = 10000
     for i in range(0, len(points) - 1):
         for j in range(i + 1, len(points)):
-            min_dist = min(min_dist, np.linalg.norm(points[i].pos - points[j].pos))
+            min_dist = min(min_dist, norm(points[i].pos - points[j].pos))
     return min_dist
 
 # reorders the corners such that the first and the second point have maximum distance
@@ -477,12 +483,12 @@ def estimate_poses(vid_path, scene_list_path):
     # assume no distortion and estimate camera matrix
     dist_coeffs = np.zeros((4, 1))
 
-    camera_matrix = np.array([(img_width, 0, img_width / 2),
+    camera_matrix = array([(img_width, 0, img_width / 2),
                               (0, img_height, img_height / 2),
                               (0, 0, 1)])
 
     # set 3d corner coordinates of the table without camera pose
-    points_3D = np.array([(137, -76.25, 0),
+    points_3D = array([(137, -76.25, 0),
                           (-137, 76.25, 0),
                           (-137, -76.25, 0),
                           (137, 76.25, 0)], dtype="double")
@@ -507,7 +513,7 @@ def estimate_poses(vid_path, scene_list_path):
     frame = 1
     best_frame_index = 0
 
-    for i in range(len(cut_frames)):
+    for i in tqdm(range(len(cut_frames))):
         max_pixels_in_bound = 0
 
         if (cut_frames[i] - last_cut_frame) < 40:
@@ -531,7 +537,7 @@ def estimate_poses(vid_path, scene_list_path):
                         best_frame_index = frame
 
 
-        #img = distort_image(img, camera_matrix, np.array([[-1], [0], [0], [0]]), img_width, img_height)
+        #img = distort_image(img, camera_matrix, array([[-1], [0], [0], [0]]), img_width, img_height)
 
         frame_indices.append(best_frame_index)
         last_cut_frame = cut_frames[i]
@@ -571,7 +577,7 @@ def estimate_poses(vid_path, scene_list_path):
                 corners = reorder_corners(corners)
                 draw_points(corners, img, "above", (255, 0, 0))
 
-                points_2D = np.array([corners[0].pos_tuple(),
+                points_2D = array([corners[0].pos_tuple(),
                                       corners[1].pos_tuple(),
                                       corners[2].pos_tuple(),
                                       corners[3].pos_tuple()], dtype="double")
@@ -588,13 +594,14 @@ def estimate_poses(vid_path, scene_list_path):
                                                             camera_matrix, dist_coeffs)
                 draw_points(projected_corners, img, "below", (0, 255, 0))
 
-                if np.matmul(rotation_mat, np.array([[0], [0], [1]]))[1] > 0:
+                if np.matmul(rotation_mat, array([[0], [0], [1]]))[1] > 0:
                     m = [[1, 0, 0], [0, -1, 0], [0, 0, -1]]
                     new_rotation_mat = np.matmul(rotation_mat, m)
                     rotation_vector, _ = cv.Rodrigues(new_rotation_mat)
 
                 draw_coordinate_frame(img, rotation_vector, translation_vector, camera_matrix, dist_coeffs)
-                #show_images([img])
+             #   print(translation_vector)
+               # show_images([img])
 
                 # check if the pose is reasonable, by reprojecting the given 3D corners on the image
                 # and comparing them with the estimated corners
@@ -621,7 +628,7 @@ def estimate_poses(vid_path, scene_list_path):
                 if pose2[3] == True:
                     similar_points = 0
                     for j in range(4):
-                        if (np.linalg.norm(scene_poses[i][2][j].pos - pose2[2][j].pos) < img_height / 40):
+                        if (norm(scene_poses[i][2][j].pos - pose2[2][j].pos) < img_height / 40):
                             similar_points += 1
 
                     if similar_points > max_similar_points:
@@ -643,8 +650,8 @@ def estimate_poses(vid_path, scene_list_path):
 
     final_poses = []
     for i in range(len(frame_poses)):
-        final_poses.append(np.concatenate((np.transpose(frame_poses[i][0])[0], np.transpose(frame_poses[i][1])[0],
-                                           np.array([int(frame_poses[i][3]), img_height, img_width]))))
+        final_poses.append(concatenate((transpose(frame_poses[i][0])[0], transpose(frame_poses[i][1])[0],
+                                           array([int(frame_poses[i][3]), img_height, img_width]))))
 
     return final_poses, frame_indices, camera_matrix, dist_coeffs
 
@@ -663,17 +670,19 @@ def show_poses(poses, indices, vid_path, camera_matrix, dist_coeffs):
             success, img = vid.read()
             frame += 1
             if frame == indices[i]:
-                draw_coordinate_frame(img, np.array([poses[frame][3], poses[frame][4], poses[frame][5]]),
-                                      np.array([poses[frame][0], poses[frame][1], poses[frame][2]]), camera_matrix,
+                draw_coordinate_frame(img, array([poses[frame][3], poses[frame][4], poses[frame][5]]),
+                                      array([poses[frame][0], poses[frame][1], poses[frame][2]]), camera_matrix,
                                       dist_coeffs)
                 show_images([img])
+                print(poses[frame])
                 break
 
 
 if __name__ == "__main__":
+    clear_dir(POSE_ESTIMATION_DIR)
 
-    for vid in os.listdir(video_dir):
-        pose_list, frame_indices, cam_mat, dist_coeffs = estimate_poses(video_dir + "/" + vid, scene_list_dir + "/" + vid[:-4] + ".csv")
-       # show_poses(pose_list, frame_indices, video_dir + "/" + vid, cam_mat, dist_coeffs)
-        create_dataset(pose_estimation_dir, vid[:-4], pose_list)
+    for vid in tqdm(VIDEO_DIR.glob("*")):
+        pose_list, frame_indices, cam_mat, dist_coeffs = estimate_poses(str(vid), str(Path(SCENE_FRAMES_DIR, vid.stem)) + ".csv")
+       # show_poses(pose_list, frame_indices, str(vid), cam_mat, dist_coeffs)
+        create_dataset(str(POSE_ESTIMATION_DIR), str(vid.stem), pose_list)
         break
